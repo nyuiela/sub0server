@@ -1,0 +1,35 @@
+{
+  "name": "sub0-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "worker": "tsx src/workers/agent-worker.ts",
+    "feed": "tsx src/services/price-feed.service.ts"
+  },
+  "dependencies": {
+    "@fastify/websocket": "^11.0.0",
+    "@prisma/client": "^6.0.0",
+    "bullmq": "^5.0.0",
+    "fastify": "^5.0.0",
+    "ioredis": "^5.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^6.0.0",
+    "viem": "^2.46.2",
+    "ws": "^8.18.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

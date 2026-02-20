@@ -1,0 +1,279 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AgentStatus {
+  ACTIVE
+  PAUSED
+  DEPLETED
+  EXPIRED
+}
+
+enum MarketStatus {
+  OPEN
+  RESOLVING
+  CLOSED
+  DISPUTED
+}
+
+enum PositionSide {
+  LONG
+  SHORT
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+  LIQUIDATED
+}
+
+enum StrategyPref {
+  AMM_ONLY
+  ORDERBOOK
+  HYBRID
+}
+
+model User {
+  id          String   @id @default(uuid())
+  username    String?  @unique
+  address     String   @unique
+  email       String?
+  authMethod  String?  // WALLET | SSO | PASSKEY
+  totalVolume Decimal  @default(0) @db.Decimal(28, 8)
+  pnl         Decimal  @default(0) @db.Decimal(28, 8)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agents     Agent[]     @relation("UserToAgent")
+  trades     Trade[]
+  positions  Position[]
+  aiRequests AiRequest[]
+
+  @@index([username])
+}
+
+model Agent {
+  id                  String    @id @default(uuid())
+  ownerId             String
+  name                String
+  persona             String
+  publicKey           String
+  encryptedPrivateKey  String
+  strategy            AgentStrategy?
+  modelSettings       Json
+  status              AgentStatus @default(ACTIVE)
+  balance             Decimal   @default(0) @db.Decimal(28, 8)
+  tradedAmount        Decimal   @default(0) @db.Decimal(28, 8)
+  totalTrades         Int       @default(0)
+  pnl                 Decimal   @default(0) @db.Decimal(28, 8)
+  templateId          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  owner       User             @relation("UserToAgent", fields: [ownerId], references: [id], onDelete: Cascade)
+  template    Template?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  trades      Trade[]
+  positions   Position[]
+  aiLogs      AiLog[]
+  activities  Activity[]
+  track       AgentTrack?
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([templateId])
+}
+
+model AgentStrategy {
+  id              String       @id @default(uuid())
+  agentId         String       @unique
+  preference      StrategyPref @default(HYBRID)
+  maxSlippage     Float
+  spreadTolerance Float
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model AgentTrack {
+  id        String   @id @default(uuid())
+  agentId   String   @unique
+  date      DateTime @db.Date
+  volume    Decimal  @default(0) @db.Decimal(28, 8)
+  trades    Int      @default(0)
+  pnl       Decimal  @default(0) @db.Decimal(28, 8)
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([date])
+}
+
+model Template {
+  id        String   @id @default(uuid())
+  name      String
+  persona   String?
+  config    Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agents Agent[]
+}
+
+model Market {
+  id              String       @id @default(uuid())
+  name            String
+  creatorAddress  String
+  volume          Decimal      @default(0) @db.Decimal(28, 8)
+  context         String?
+  outcomes        Json
+  sourceUrl       String?
+  resolutionDate  DateTime
+  oracleAddress   String
+  status          MarketStatus @default(OPEN)
+  collateralToken String
+  conditionId     String       @unique
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  trades    Trade[]
+  positions Position[]
+  orders    Order[]
+  news      News[]
+  aiLogs    AiLog[]
+
+  @@index([creatorAddress])
+  @@index([status])
+  @@index([conditionId])
+}
+
+model Position {
+  id               String         @id @default(uuid())
+  marketId         String
+  userId           String?
+  agentId          String?
+  address          String
+  tokenAddress     String
+  outcomeIndex     Int
+  side             PositionSide
+  status           PositionStatus @default(OPEN)
+  avgPrice         Decimal        @db.Decimal(28, 18)
+  collateralLocked Decimal        @db.Decimal(28, 18)
+  isAmm            Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  market Market  @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+  @@index([userId])
+  @@index([agentId])
+  @@index([address])
+}
+
+model Trade {
+  id         String   @id @default(uuid())
+  marketId   String
+  userId     String?
+  agentId    String?
+  side       String
+  amount     Decimal  @db.Decimal(28, 18)
+  price      Decimal  @db.Decimal(28, 18)
+  txHash     String?
+  createdAt  DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+  @@index([userId])
+  @@index([agentId])
+}
+
+model Order {
+  id        String   @id @default(uuid())
+  marketId  String
+  side      String
+  amount    Decimal  @db.Decimal(28, 18)
+  price     Decimal  @db.Decimal(28, 18)
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+}
+
+model News {
+  id        String   @id @default(uuid())
+  marketId  String
+  title     String
+  body      String?
+  sourceUrl String?
+  createdAt DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+}
+
+model AiLog {
+  id        String   @id @default(uuid())
+  agentId   String
+  marketId  String?
+  action    String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market Market? @relation(fields: [marketId], references: [id], onDelete: SetNull)
+
+  @@index([agentId])
+  @@index([marketId])
+}
+
+model AiRequest {
+  id        String   @id @default(uuid())
+  userId    String
+  prompt    String
+  response  String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Activity {
+  id        String   @id @default(uuid())
+  agentId   String
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+model Tool {
+  id               String   @id @default(uuid())
+  name             String
+  url              String
+  description      String
+  fee              Decimal  @db.Decimal(28, 8)
+  receiverAddress  String
+  inputSchema      Json
+  outputSchema     Json
+  provider         String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
