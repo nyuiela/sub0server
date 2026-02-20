@@ -1,26 +1,16 @@
 export const AUTH_METHODS = ["WALLET", "SSO", "PASSKEY"] as const;
 export type AuthMethod = (typeof AUTH_METHODS)[number];
 
-export interface ChallengePayload {
-  message: string;
-  nonce: string;
-  expiresAt: string;
-}
-
 export interface RegisterAgentCreate {
   name: string;
-  persona: string;
-  publicKey: string;
-  encryptedPrivateKey: string;
-  modelSettings: Record<string, unknown>;
+  persona?: string;
+  modelSettings?: Record<string, unknown>;
 }
 
 export interface RegisterAgentTemplate {
   templateId: string;
   name: string;
   persona?: string;
-  publicKey: string;
-  encryptedPrivateKey: string;
   modelSettings?: Record<string, unknown>;
 }
 

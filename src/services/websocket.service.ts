@@ -1,6 +1,6 @@
 import type { WebSocket } from "ws";
 import type { FastifyRequest } from "fastify";
-import { HEARTBEAT_INTERVAL_MS } from "../config/index.js";
+import { HEARTBEAT_INTERVAL_MS, REDIS_CHANNELS, ROOM_PREFIX } from "../config/index.js";
 import { WS_EVENT_NAMES } from "../types/websocket-events.js";
 import {
   wsMessageSchema,
@@ -8,7 +8,7 @@ import {
   unsubscribeMessageSchema,
   pingMessageSchema,
 } from "../schemas/websocket.schema.js";
-import type { WsMessage, WsEventName } from "../types/websocket-events.js";
+import type { WsMessage, WsEventName, OrderBookUpdatePayload } from "../types/websocket-events.js";
 import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.js";
 
 const BROADCAST_CHANNEL = "ws:broadcast";
@@ -43,15 +43,47 @@ export class SocketManager {
   private async subscribeRedis(): Promise<void> {
     const sub = await getRedisSubscriber();
     this.redisSub = sub;
-    await sub.subscribe(BROADCAST_CHANNEL);
+    await sub.subscribe(BROADCAST_CHANNEL, REDIS_CHANNELS.ORDER_BOOK_UPDATE, REDIS_CHANNELS.TRADES);
     sub.on("message", (channel: string, message: string) => {
-      if (channel !== BROADCAST_CHANNEL) return;
       try {
-        const { room, payload } = JSON.parse(message) as {
-          room: string;
-          payload: WsMessage<WsEventName>;
-        };
-        this.broadcastToLocalRoom(room, payload);
+        if (channel === BROADCAST_CHANNEL) {
+          const { room, payload } = JSON.parse(message) as {
+            room: string;
+            payload: WsMessage<WsEventName>;
+          };
+          this.broadcastToLocalRoom(room, payload);
+          return;
+        }
+        if (channel === REDIS_CHANNELS.ORDER_BOOK_UPDATE) {
+          const { marketId, snapshot } = JSON.parse(message) as {
+            marketId: string;
+            snapshot: OrderBookUpdatePayload;
+          };
+          const room = `${ROOM_PREFIX}${marketId}`;
+          this.broadcastToLocalRoom(room, {
+            type: WS_EVENT_NAMES.ORDER_BOOK_UPDATE,
+            payload: { ...snapshot, marketId },
+          });
+          return;
+        }
+        if (channel === REDIS_CHANNELS.TRADES) {
+          const { trade } = JSON.parse(message) as {
+            trade: { marketId: string; side: string; quantity: string; price: string; executedAt: number; userId?: string; agentId?: string };
+          };
+          const room = `${ROOM_PREFIX}${trade.marketId}`;
+          this.broadcastToLocalRoom(room, {
+            type: WS_EVENT_NAMES.TRADE_EXECUTED,
+            payload: {
+              marketId: trade.marketId,
+              side: trade.side === "BID" ? "long" : "short",
+              size: trade.quantity,
+              price: trade.price,
+              executedAt: new Date(trade.executedAt).toISOString(),
+              userId: trade.userId,
+              agentId: trade.agentId,
+            },
+          });
+        }
       } catch {
         // ignore malformed
       }
@@ -59,7 +91,7 @@ export class SocketManager {
   }
 
   addSocket(socket: WebSocket, req: FastifyRequest): void {
-    const userId = (req as FastifyRequest & { userId?: string | null }).userId ?? null;
+    const userId = req.auth?.type === "user" ? (req.auth.userId ?? req.auth.address) : null;
     this.socketUserId.set(socket, userId);
     this.socketToRooms.set(socket, new Set());
     this.socketMeta.set(socket, { lastPongAt: Date.now(), heartbeatTimer: null });

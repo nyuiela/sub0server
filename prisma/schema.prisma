@@ -43,6 +43,7 @@ model User {
   username    String?  @unique
   address     String   @unique
   email       String?
+  imageUrl    String?
   authMethod  String?  // WALLET | SSO | PASSKEY
   totalVolume Decimal  @default(0) @db.Decimal(28, 8)
   pnl         Decimal  @default(0) @db.Decimal(28, 8)
@@ -117,6 +118,7 @@ model Template {
   id        String   @id @default(uuid())
   name      String
   persona   String?
+  imageUrl  String?
   config    Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -130,6 +132,7 @@ model Market {
   creatorAddress  String
   volume          Decimal      @default(0) @db.Decimal(28, 8)
   context         String?
+  imageUrl        String?
   outcomes        Json
   sourceUrl       String?
   resolutionDate  DateTime
@@ -217,6 +220,7 @@ model News {
   marketId  String
   title     String
   body      String?
+  imageUrl  String?
   sourceUrl String?
   createdAt DateTime @default(now())
 
@@ -269,6 +273,7 @@ model Tool {
   name             String
   url              String
   description      String
+  imageUrl         String?
   fee              Decimal  @db.Decimal(28, 8)
   receiverAddress  String
   inputSchema      Json

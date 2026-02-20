@@ -36,6 +36,29 @@ function makeConfig() {
     get challengeTtlSeconds(): number {
       return Number(optionalEnv("CHALLENGE_TTL_SECONDS", "300"));
     },
+    get authDomain(): string {
+      return optionalEnv("AUTH_DOMAIN", "localhost:3000");
+    },
+    get authCookieName(): string {
+      return optionalEnv("AUTH_COOKIE_NAME", "sub0-auth-jwt");
+    },
+    get thirdwebSecretKey(): string | undefined {
+      return process.env.THIRDWEB_SECRET_KEY ?? undefined;
+    },
+    get thirdwebAdminPrivateKey(): string | undefined {
+      return process.env.THIRDWEB_ADMIN_PRIVATE_KEY ?? undefined;
+    },
+    get apiKey(): string | undefined {
+      return process.env.API_KEY ?? undefined;
+    },
+    get agentEncryptionSecret(): string {
+      return process.env.AGENT_ENCRYPTION_SECRET ?? requiredEnv("JWT_SECRET");
+    },
+    get corsOrigin(): string | true {
+      const o = process.env.CORS_ORIGIN;
+      if (o === "true" || o === "*") return true;
+      return o ?? "http://localhost:3000";
+    },
   };
 }
 
@@ -45,6 +68,7 @@ export const REDIS_CHANNELS = {
   PRICE_FEED: "price_feed",
   MARKET_UPDATES: "market_updates",
   TRADES: "trades",
+  ORDER_BOOK_UPDATE: "order_book_update",
 } as const;
 
 export const HEARTBEAT_INTERVAL_MS = 30_000;

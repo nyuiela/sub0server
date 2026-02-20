@@ -3,11 +3,13 @@ dotenv.config();
 
 import Fastify from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
+import fastifyCookie from "@fastify/cookie";
+import fastifyCors from "@fastify/cors";
 import { config } from "./config/index.js";
 import { getSocketManager } from "./services/websocket.service.js";
-import { verifyToken, getTokenFromRequest } from "./lib/jwt.js";
 import { getPrismaClient, disconnectPrisma } from "./lib/prisma.js";
 import { closeRedis } from "./lib/redis.js";
+import { resolveRequestAuth } from "./lib/auth.js";
 import { registerAgentEnqueueRoutes } from "./routes/agent-enqueue.routes.js";
 import { registerUserRoutes } from "./routes/users.routes.js";
 import { registerAgentRoutes } from "./routes/agents.routes.js";
@@ -17,30 +19,19 @@ import { registerStrategyRoutes } from "./routes/strategies.routes.js";
 import { registerToolRoutes } from "./routes/tools.routes.js";
 import { registerRegisterRoutes } from "./routes/register.routes.js";
 
-interface AuthenticatedRequest {
-  userId?: string | null;
-}
-
 const fastify = Fastify({ logger: true });
 
+await fastify.register(fastifyCookie, { parseOptions: {} });
+await fastify.register(fastifyCors, {
+  origin: config.corsOrigin,
+  credentials: true,
+});
 fastify.register(fastifyWebsocket, {
   options: { maxPayload: 65536 },
 });
 
-fastify.addHook("preValidation", async (request, reply) => {
-  const token = getTokenFromRequest(
-    request.headers.authorization,
-    (request.query as { token?: string })?.token
-  );
-  if (token === null) {
-    (request as AuthenticatedRequest).userId = null;
-    return;
-  }
-  const payload = verifyToken(token);
-  if (payload === null) {
-    return reply.code(401).send({ error: "Invalid or expired token" });
-  }
-  (request as AuthenticatedRequest).userId = payload.sub;
+fastify.addHook("preValidation", async (request) => {
+  request.auth = await resolveRequestAuth(request);
 });
 
 fastify.get("/ws", { websocket: true }, async (socket, req) => {

@@ -1,6 +1,7 @@
 export const WS_EVENT_NAMES = {
   MARKET_UPDATE: "MARKET_UPDATE",
   TRADE_EXECUTED: "TRADE_EXECUTED",
+  ORDER_BOOK_UPDATE: "ORDER_BOOK_UPDATE",
   PRICE_UPDATE: "PRICE_UPDATE",
   SUBSCRIBE: "SUBSCRIBE",
   UNSUBSCRIBE: "UNSUBSCRIBE",
@@ -21,7 +22,7 @@ export interface MarketUpdatePayload {
 }
 
 export interface TradeExecutedPayload {
-  positionId: string;
+  positionId?: string;
   marketId: string;
   side: "long" | "short";
   size: string;
@@ -29,6 +30,14 @@ export interface TradeExecutedPayload {
   agentId?: string;
   userId?: string;
   executedAt: string;
+}
+
+/** Order book snapshot from matching engine (ORDER_BOOK_UPDATE). */
+export interface OrderBookUpdatePayload {
+  marketId: string;
+  bids: { price: string; quantity: string; orderCount?: number }[];
+  asks: { price: string; quantity: string; orderCount?: number }[];
+  timestamp: number;
 }
 
 export interface PriceUpdatePayload {
@@ -54,6 +63,7 @@ export interface WsErrorPayload {
 export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.MARKET_UPDATE]: MarketUpdatePayload;
   [WS_EVENT_NAMES.TRADE_EXECUTED]: TradeExecutedPayload;
+  [WS_EVENT_NAMES.ORDER_BOOK_UPDATE]: OrderBookUpdatePayload;
   [WS_EVENT_NAMES.PRICE_UPDATE]: PriceUpdatePayload;
   [WS_EVENT_NAMES.SUBSCRIBE]: SubscribePayload;
   [WS_EVENT_NAMES.UNSUBSCRIBE]: UnsubscribePayload;
