@@ -1,10 +1,11 @@
-import { Queue, Worker, type Job } from "bullmq";
+import { Queue } from "bullmq";
 import { config } from "../config/index.js";
-import type { ExecutedTrade } from "../types/order-book.js";
+import type { ExecutedTrade, EngineOrder } from "../types/order-book.js";
 
 export const TRADES_QUEUE_NAME = "matching-engine-trades";
 
 export interface TradesJobPayload {
+  order?: EngineOrder;
   trades: ExecutedTrade[];
 }
 
@@ -20,10 +21,13 @@ export async function getTradesQueue(): Promise<Queue<TradesJobPayload>> {
 }
 
 /**
- * Enqueue executed trades for background persistence. Do not block the matching engine.
+ * Enqueue order and executed trades for background persistence. Do not block the matching engine.
+ * Every processed order is persisted; trades are persisted when present.
  */
-export async function enqueueTradesForPersistence(trades: ExecutedTrade[]): Promise<void> {
-  if (trades.length === 0) return;
+export async function enqueueOrderAndTradesForPersistence(
+  order: EngineOrder,
+  trades: ExecutedTrade[]
+): Promise<void> {
   const queue = await getTradesQueue();
-  await queue.add("persist", { trades }, { removeOnComplete: { count: 1000 } });
+  await queue.add("persist", { order, trades }, { removeOnComplete: { count: 1000 } });
 }

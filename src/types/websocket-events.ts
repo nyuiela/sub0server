@@ -1,5 +1,7 @@
 export const WS_EVENT_NAMES = {
   MARKET_UPDATE: "MARKET_UPDATE",
+  MARKET_UPDATED: "MARKET_UPDATED",
+  MARKET_STATS_UPDATED: "MARKET_STATS_UPDATED",
   TRADE_EXECUTED: "TRADE_EXECUTED",
   ORDER_BOOK_UPDATE: "ORDER_BOOK_UPDATE",
   PRICE_UPDATE: "PRICE_UPDATE",
@@ -19,6 +21,19 @@ export interface MarketUpdatePayload {
   poolLong: string;
   poolShort: string;
   updatedAt: string;
+}
+
+/** Emitted when trade persistence updates market volume (and optionally other stats). */
+export interface MarketStatsUpdatedPayload {
+  marketId: string;
+  volume: string;
+}
+
+/** Emitted when market or related data changes (create, update, delete, trades, positions, etc.). */
+export interface MarketUpdatedPayload {
+  marketId: string;
+  reason?: "created" | "updated" | "deleted" | "stats" | "position" | "orderbook";
+  volume?: string;
 }
 
 export interface TradeExecutedPayload {
@@ -62,6 +77,8 @@ export interface WsErrorPayload {
 
 export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.MARKET_UPDATE]: MarketUpdatePayload;
+  [WS_EVENT_NAMES.MARKET_UPDATED]: MarketUpdatedPayload;
+  [WS_EVENT_NAMES.MARKET_STATS_UPDATED]: MarketStatsUpdatedPayload;
   [WS_EVENT_NAMES.TRADE_EXECUTED]: TradeExecutedPayload;
   [WS_EVENT_NAMES.ORDER_BOOK_UPDATE]: OrderBookUpdatePayload;
   [WS_EVENT_NAMES.PRICE_UPDATE]: PriceUpdatePayload;

@@ -15,7 +15,10 @@
     "test:watch": "vitest",
     "worker": "tsx src/workers/agent-worker.ts",
     "worker:trades": "tsx src/workers/trades-persistence.worker.ts",
-    "feed": "tsx src/services/price-feed.service.ts"
+    "feed": "tsx src/services/price-feed.service.ts",
+    "live-test": "tsx src/scripts/live-test.ts",
+    "ws-test": "tsx src/scripts/ws-test.ts",
+    "stake-verify": "tsx src/scripts/stake-verify-live.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

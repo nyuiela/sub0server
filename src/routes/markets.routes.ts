@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
+import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { requireUserOrApiKey, requireMarketCreatorOrApiKey } from "../lib/permissions.js";
 import { requireUser, requireApiKey } from "../lib/auth.js";
 import {
@@ -17,6 +18,7 @@ import {
   getOrderBookStatsForMarket,
   type MarketStatsRow,
 } from "../services/market-stats.service.js";
+import { getMarketHolders, getMarketTraders } from "../services/activities.service.js";
 
 function serializeMarket(market: {
   id: string;
@@ -150,6 +152,22 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     return reply.send(response);
   });
 
+  app.get("/api/markets/:id/holders", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const prisma = getPrismaClient();
+    const market = await prisma.market.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!market) return reply.code(404).send({ error: "Market not found" });
+    const holders = await getMarketHolders(market.id);
+    return reply.send({ data: holders });
+  });
+
+  app.get("/api/markets/:id/traders", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const prisma = getPrismaClient();
+    const market = await prisma.market.findUnique({ where: { id: req.params.id }, select: { id: true } });
+    if (!market) return reply.code(404).send({ error: "Market not found" });
+    const traders = await getMarketTraders(market.id);
+    return reply.send({ data: traders });
+  });
+
   app.get("/api/markets/condition/:conditionId", async (req: FastifyRequest<{ Params: { conditionId: string } }>, reply: FastifyReply) => {
     const prisma = getPrismaClient();
     const market = await prisma.market.findUnique({
@@ -200,6 +218,11 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
         platform: parsed.data.platform ?? "NATIVE",
       },
     });
+    await broadcastMarketUpdate({
+      marketId: market.id,
+      reason: MARKET_UPDATE_REASON.CREATED,
+      volume: market.volume.toString(),
+    });
     return reply.code(201).send(serializeMarket(market));
   });
 
@@ -228,13 +251,20 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       data,
     }).catch(() => null);
     if (!market) return reply.code(404).send({ error: "Market not found" });
+    await broadcastMarketUpdate({
+      marketId: market.id,
+      reason: MARKET_UPDATE_REASON.UPDATED,
+      volume: market.volume.toString(),
+    });
     return reply.send(serializeMarket(market));
   });
 
   app.delete("/api/markets/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     if (!(await requireMarketCreatorOrApiKey(req, reply))) return;
+    const marketId = req.params.id;
     const prisma = getPrismaClient();
-    await prisma.market.delete({ where: { id: req.params.id } }).catch(() => null);
+    await prisma.market.delete({ where: { id: marketId } }).catch(() => null);
+    await broadcastMarketUpdate({ marketId, reason: MARKET_UPDATE_REASON.DELETED });
     return reply.code(204).send();
   });
 }

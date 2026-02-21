@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "../lib/prisma.js";
+import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { requireUserOrApiKey, requirePositionOwnerOrApiKey } from "../lib/permissions.js";
 import {
   positionCreateSchema,
@@ -107,6 +108,10 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       },
       include: { market: { select: { id: true, name: true } } },
     });
+    await broadcastMarketUpdate({
+      marketId: position.marketId,
+      reason: MARKET_UPDATE_REASON.POSITION,
+    });
     return reply.code(201).send({ ...serializePosition(position), market: position.market });
   });
 
@@ -125,13 +130,27 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       })
       .catch(() => null);
     if (!position) return reply.code(404).send({ error: "Position not found" });
+    await broadcastMarketUpdate({
+      marketId: position.marketId,
+      reason: MARKET_UPDATE_REASON.POSITION,
+    });
     return reply.send({ ...serializePosition(position), market: position.market });
   });
 
   app.delete("/api/positions/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     if (!(await requirePositionOwnerOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
+    const position = await prisma.position.findUnique({
+      where: { id: req.params.id },
+      select: { marketId: true },
+    });
     await prisma.position.delete({ where: { id: req.params.id } }).catch(() => null);
+    if (position) {
+      await broadcastMarketUpdate({
+        marketId: position.marketId,
+        reason: MARKET_UPDATE_REASON.POSITION,
+      });
+    }
     return reply.code(204).send();
   });
 }

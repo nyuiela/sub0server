@@ -6,9 +6,13 @@ import {
   wsMessageSchema,
   subscribeMessageSchema,
   unsubscribeMessageSchema,
-  pingMessageSchema,
 } from "../schemas/websocket.schema.js";
-import type { WsMessage, WsEventName, OrderBookUpdatePayload } from "../types/websocket-events.js";
+import type {
+  WsMessage,
+  WsEventName,
+  OrderBookUpdatePayload,
+  MarketUpdatedPayload,
+} from "../types/websocket-events.js";
 import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.js";
 
 const BROADCAST_CHANNEL = "ws:broadcast";
@@ -43,7 +47,12 @@ export class SocketManager {
   private async subscribeRedis(): Promise<void> {
     const sub = await getRedisSubscriber();
     this.redisSub = sub;
-    await sub.subscribe(BROADCAST_CHANNEL, REDIS_CHANNELS.ORDER_BOOK_UPDATE, REDIS_CHANNELS.TRADES);
+    await sub.subscribe(
+      BROADCAST_CHANNEL,
+      REDIS_CHANNELS.ORDER_BOOK_UPDATE,
+      REDIS_CHANNELS.TRADES,
+      REDIS_CHANNELS.MARKET_UPDATES
+    );
     sub.on("message", (channel: string, message: string) => {
       try {
         if (channel === BROADCAST_CHANNEL) {
@@ -83,6 +92,37 @@ export class SocketManager {
               agentId: trade.agentId,
             },
           });
+          return;
+        }
+        if (channel === REDIS_CHANNELS.MARKET_UPDATES) {
+          const raw = JSON.parse(message) as {
+            marketId: string;
+            reason?: string;
+            volume?: string;
+          };
+          const reason = raw.reason ?? (raw.volume != null ? "stats" : undefined);
+          const payload: MarketUpdatedPayload = {
+            marketId: raw.marketId,
+            reason:
+              reason === "created" ||
+              reason === "updated" ||
+              reason === "deleted" ||
+              reason === "stats" ||
+              reason === "position" ||
+              reason === "orderbook"
+                ? reason
+                : undefined,
+            volume: raw.volume,
+          };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.MARKET_UPDATED,
+            payload,
+          };
+          const room = `${ROOM_PREFIX}${raw.marketId}`;
+          this.broadcastToLocalRoom(room, msg);
+          if (payload.reason === "created" || payload.reason === "deleted") {
+            this.broadcastToLocalRoom("markets", msg);
+          }
         }
       } catch {
         // ignore malformed
@@ -91,6 +131,10 @@ export class SocketManager {
   }
 
   addSocket(socket: WebSocket, req: FastifyRequest): void {
+    if (!socket || typeof socket.on !== "function") {
+      console.error("Invalid WebSocket instance passed to addSocket");
+      return;
+    }
     const userId = req.auth?.type === "user" ? (req.auth.userId ?? req.auth.address) : null;
     this.socketUserId.set(socket, userId);
     this.socketToRooms.set(socket, new Set());
@@ -166,10 +210,12 @@ export class SocketManager {
       this.unsubscribe(socket, unsubParsed.data.payload.room);
       return;
     }
-    if (pingMessageSchema.safeParse(msg).success) {
+    if (msg.type === WS_EVENT_NAMES.PING || msg.type === WS_EVENT_NAMES.PONG) {
       const meta = this.socketMeta.get(socket);
       if (meta) meta.lastPongAt = Date.now();
-      this.send(socket, { type: WS_EVENT_NAMES.PONG, payload: undefined });
+      if (msg.type === WS_EVENT_NAMES.PING) {
+        this.send(socket, { type: WS_EVENT_NAMES.PONG, payload: undefined });
+      }
       return;
     }
   }

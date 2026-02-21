@@ -15,7 +15,7 @@
 import { getOrderBook } from "./matching-engine.js";
 import { getRedisPublisher } from "../lib/redis.js";
 import { REDIS_CHANNELS } from "../config/index.js";
-import { enqueueTradesForPersistence } from "../workers/trades-queue.js";
+import { enqueueOrderAndTradesForPersistence } from "../workers/trades-queue.js";
 import type { OrderInput, ExecutedTrade, OrderBookSnapshot } from "../types/order-book.js";
 
 /** Payload published to Redis for ORDER_BOOK_UPDATE. */
@@ -70,6 +70,11 @@ async function processOne(marketId: string, input: OrderInput): Promise<{
     JSON.stringify({ marketId, snapshot: result.orderBookSnapshot } as OrderBookUpdateMessage)
   );
 
+  await redis.publish(
+    REDIS_CHANNELS.MARKET_UPDATES,
+    JSON.stringify({ marketId, reason: "orderbook" })
+  );
+
   for (const trade of result.trades) {
     await redis.publish(
       REDIS_CHANNELS.TRADES,
@@ -77,11 +82,9 @@ async function processOne(marketId: string, input: OrderInput): Promise<{
     );
   }
 
-  if (result.trades.length > 0) {
-    enqueueTradesForPersistence(result.trades).catch((err) =>
-      console.error("Enqueue trades for persistence failed:", err)
-    );
-  }
+  enqueueOrderAndTradesForPersistence(result.order, result.trades).catch((err) =>
+    console.error("Enqueue order and trades for persistence failed:", err)
+  );
 
   return { trades: result.trades, snapshot: result.orderBookSnapshot };
 }
