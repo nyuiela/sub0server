@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireApiKeyOnly } from "../lib/permissions.js";
 import {
   toolCreateSchema,
   toolUpdateSchema,
@@ -63,6 +64,7 @@ export async function registerToolRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/api/tools", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+    if (!requireApiKeyOnly(req, reply)) return;
     const parsed = toolCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -79,6 +81,7 @@ export async function registerToolRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.patch("/api/tools/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!requireApiKeyOnly(req, reply)) return;
     const parsed = toolUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -103,6 +106,7 @@ export async function registerToolRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete("/api/tools/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!requireApiKeyOnly(req, reply)) return;
     const prisma = getPrismaClient();
     await prisma.tool.delete({ where: { id: req.params.id } }).catch(() => null);
     return reply.code(204).send();

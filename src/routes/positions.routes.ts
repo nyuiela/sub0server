@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireUserOrApiKey, requirePositionOwnerOrApiKey } from "../lib/permissions.js";
 import {
   positionCreateSchema,
   positionUpdateSchema,
@@ -22,6 +23,7 @@ function serializePosition(position: {
   avgPrice: { toString(): string };
   collateralLocked: { toString(): string };
   isAmm: boolean;
+  contractPositionId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -81,6 +83,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
   });
 
   app.post("/api/positions", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
     const parsed = positionCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -108,6 +111,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
   });
 
   app.patch("/api/positions/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!(await requirePositionOwnerOrApiKey(req, reply))) return;
     const parsed = positionUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -125,6 +129,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
   });
 
   app.delete("/api/positions/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requirePositionOwnerOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
     await prisma.position.delete({ where: { id: req.params.id } }).catch(() => null);
     return reply.code(204).send();

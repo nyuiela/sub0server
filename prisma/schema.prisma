@@ -21,6 +21,14 @@ enum MarketStatus {
   DISPUTED
 }
 
+enum MarketPlatform {
+  NATIVE
+  POLYMARKET
+  KALSHI
+  MANIFOLD
+  OTHER
+}
+
 enum PositionSide {
   LONG
   SHORT
@@ -127,21 +135,25 @@ model Template {
 }
 
 model Market {
-  id              String       @id @default(uuid())
+  id              String          @id @default(uuid())
   name            String
   creatorAddress  String
-  volume          Decimal      @default(0) @db.Decimal(28, 8)
+  volume          Decimal         @default(0) @db.Decimal(28, 8)
   context         String?
   imageUrl        String?
   outcomes        Json
   sourceUrl       String?
   resolutionDate  DateTime
   oracleAddress   String
-  status          MarketStatus @default(OPEN)
+  status          MarketStatus    @default(OPEN)
   collateralToken String
-  conditionId     String       @unique
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  conditionId     String          @unique
+  platform        MarketPlatform  @default(NATIVE)
+  liquidity       Decimal?        @db.Decimal(28, 8)
+  confidence      Float?
+  pnl             Decimal?       @db.Decimal(28, 8)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   trades    Trade[]
   positions Position[]
@@ -152,23 +164,25 @@ model Market {
   @@index([creatorAddress])
   @@index([status])
   @@index([conditionId])
+  @@index([platform])
 }
 
 model Position {
-  id               String         @id @default(uuid())
-  marketId         String
-  userId           String?
-  agentId          String?
-  address          String
-  tokenAddress     String
-  outcomeIndex     Int
-  side             PositionSide
-  status           PositionStatus @default(OPEN)
-  avgPrice         Decimal        @db.Decimal(28, 18)
-  collateralLocked Decimal        @db.Decimal(28, 18)
-  isAmm            Boolean        @default(false)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                  String         @id @default(uuid())
+  marketId            String
+  userId              String?
+  agentId             String?
+  address             String
+  tokenAddress        String
+  outcomeIndex        Int
+  side                PositionSide
+  status              PositionStatus @default(OPEN)
+  avgPrice            Decimal        @db.Decimal(28, 18)
+  collateralLocked    Decimal        @db.Decimal(28, 18)
+  isAmm               Boolean        @default(false)
+  contractPositionId  String?       // Position/token id from smart contract
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)

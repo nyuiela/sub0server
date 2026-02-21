@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireUserOrApiKey, requireOwnUserOrApiKey } from "../lib/permissions.js";
 import {
   userCreateSchema,
   userUpdateSchema,
@@ -58,6 +59,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/api/users", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
     const parsed = userCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -68,6 +70,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.patch("/api/users/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!(await requireOwnUserOrApiKey(req, reply))) return;
     const parsed = userUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -82,6 +85,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete("/api/users/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireOwnUserOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
     await prisma.user.delete({ where: { id: req.params.id } }).catch(() => null);
     return reply.code(204).send();

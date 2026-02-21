@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireUserOrApiKey, requireMarketCreatorOrApiKey } from "../lib/permissions.js";
+import { requireUser, requireApiKey } from "../lib/auth.js";
 import {
   marketCreateSchema,
   marketUpdateSchema,
@@ -9,6 +11,12 @@ import {
   type MarketUpdateInput,
   type MarketQueryInput,
 } from "../schemas/market.schema.js";
+import {
+  getMarketStatsBatch,
+  getMarketPositionIds,
+  getOrderBookStatsForMarket,
+  type MarketStatsRow,
+} from "../services/market-stats.service.js";
 
 function serializeMarket(market: {
   id: string;
@@ -16,6 +24,7 @@ function serializeMarket(market: {
   creatorAddress: string;
   volume: { toString(): string };
   context: string | null;
+  imageUrl?: string | null;
   outcomes: unknown;
   sourceUrl: string | null;
   resolutionDate: Date;
@@ -23,6 +32,10 @@ function serializeMarket(market: {
   status: string;
   collateralToken: string;
   conditionId: string;
+  platform?: string;
+  liquidity?: { toString(): string } | null;
+  confidence?: number | null;
+  pnl?: { toString(): string } | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -30,6 +43,23 @@ function serializeMarket(market: {
     ...market,
     volume: market.volume.toString(),
     resolutionDate: market.resolutionDate.toISOString(),
+    liquidity: market.liquidity?.toString() ?? null,
+    pnl: market.pnl?.toString() ?? null,
+  };
+}
+
+function withListStats(
+  serialized: ReturnType<typeof serializeMarket>,
+  stats: MarketStatsRow
+) {
+  return {
+    ...serialized,
+    totalVolume: stats.totalVolume,
+    uniqueStakersCount: stats.uniqueStakers,
+    lastTradeAt: stats.lastTradeAt?.toISOString() ?? null,
+    totalTrades: stats.totalTrades,
+    agentsEngagingCount: stats.agentsEngaging,
+    newsCount: stats.newsCount,
   };
 }
 
@@ -39,9 +69,13 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
-    const { status, creatorAddress, limit, offset } = parsed.data;
+    const { status, creatorAddress, platform, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
-    const where = { ...(status ? { status } : {}), ...(creatorAddress ? { creatorAddress } : {}) };
+    const where: Prisma.MarketWhereInput = {
+      ...(status ? { status } : {}),
+      ...(creatorAddress ? { creatorAddress } : {}),
+      ...(platform ? { platform } : {}),
+    };
     const [markets, total] = await Promise.all([
       prisma.market.findMany({
         where,
@@ -51,8 +85,29 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       }),
       prisma.market.count({ where }),
     ]);
+    const marketIds = markets.map((m) => m.id);
+    const statsMap = await getMarketStatsBatch(marketIds);
+    const data = markets.map((m) => {
+      const stats = statsMap.get(m.id) ?? {
+        marketId: m.id,
+        totalVolume: "0",
+        lastTradeAt: null,
+        totalTrades: 0,
+        uniqueStakers: 0,
+        agentsEngaging: 0,
+        newsCount: 0,
+      };
+      const orderBook = getOrderBookStatsForMarket(m.id);
+      const base = withListStats(serializeMarket(m), stats as MarketStatsRow);
+      return {
+        ...base,
+        activeOrderCount: orderBook.activeOrderCount,
+        orderBookBidLiquidity: orderBook.bidLiquidity,
+        orderBookAskLiquidity: orderBook.askLiquidity,
+      };
+    });
     return reply.send({
-      data: markets.map(serializeMarket),
+      data,
       total,
       limit,
       offset,
@@ -66,11 +121,33 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       include: { positions: { take: 10 }, orders: { take: 5 } },
     });
     if (!market) return reply.code(404).send({ error: "Market not found" });
-    return reply.send({
-      ...serializeMarket(market),
+    const [statsMap, positionIds, orderBook] = await Promise.all([
+      getMarketStatsBatch([market.id]),
+      getMarketPositionIds(market.id),
+      Promise.resolve(getOrderBookStatsForMarket(market.id)),
+    ]);
+    const stats = statsMap.get(market.id);
+    const base = serializeMarket(market);
+    const response = {
+      ...base,
+      totalVolume: stats?.totalVolume ?? base.volume,
+      uniqueStakersCount: stats?.uniqueStakers ?? 0,
+      lastTradeAt: stats?.lastTradeAt?.toISOString() ?? null,
+      totalTrades: stats?.totalTrades ?? 0,
+      activeOrderCount: orderBook.activeOrderCount,
+      orderBookBidLiquidity: orderBook.bidLiquidity,
+      orderBookAskLiquidity: orderBook.askLiquidity,
+      liquidity: base.liquidity,
+      agentsEngagingCount: stats?.agentsEngaging ?? 0,
+      positionIds,
+      pnl: base.pnl,
+      confidence: "confidence" in market ? (market as { confidence?: number | null }).confidence ?? null : null,
+      newsCount: stats?.newsCount ?? 0,
+      orderBookSnapshot: orderBook.snapshot,
       positions: market.positions,
       orders: market.orders,
-    });
+    };
+    return reply.send(response);
   });
 
   app.get("/api/markets/condition/:conditionId", async (req: FastifyRequest<{ Params: { conditionId: string } }>, reply: FastifyReply) => {
@@ -79,13 +156,32 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       where: { conditionId: req.params.conditionId },
     });
     if (!market) return reply.code(404).send({ error: "Market not found" });
-    return reply.send(serializeMarket(market));
+    const [statsMap] = await Promise.all([getMarketStatsBatch([market.id])]);
+    const stats = statsMap.get(market.id);
+    const base = serializeMarket(market);
+    const withStats = stats
+      ? withListStats(base, stats)
+      : { ...base, totalVolume: base.volume, uniqueStakersCount: 0, lastTradeAt: null, totalTrades: 0, agentsEngagingCount: 0, newsCount: 0 };
+    const orderBook = getOrderBookStatsForMarket(market.id);
+    return reply.send({
+      ...withStats,
+      activeOrderCount: orderBook.activeOrderCount,
+      orderBookBidLiquidity: orderBook.bidLiquidity,
+      orderBookAskLiquidity: orderBook.askLiquidity,
+    });
   });
 
   app.post("/api/markets", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
     const parsed = marketCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
+    }
+    if (!requireApiKey(req)) {
+      const user = requireUser(req);
+      if (user && parsed.data.creatorAddress?.toLowerCase() !== user.address.toLowerCase()) {
+        return reply.code(403).send({ error: "Forbidden: creatorAddress must match your wallet" });
+      }
     }
     const prisma = getPrismaClient();
     const existing = await prisma.market.findUnique({ where: { conditionId: parsed.data.conditionId } });
@@ -101,12 +197,14 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
         oracleAddress: parsed.data.oracleAddress,
         collateralToken: parsed.data.collateralToken,
         conditionId: parsed.data.conditionId,
+        platform: parsed.data.platform ?? "NATIVE",
       },
     });
     return reply.code(201).send(serializeMarket(market));
   });
 
   app.patch("/api/markets/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!(await requireMarketCreatorOrApiKey(req, reply))) return;
     const parsed = marketUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -120,6 +218,10 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     if (raw.resolutionDate !== undefined) data.resolutionDate = new Date(raw.resolutionDate);
     if (raw.oracleAddress !== undefined) data.oracleAddress = raw.oracleAddress;
     if (raw.status !== undefined) data.status = raw.status;
+    if (raw.platform !== undefined) data.platform = raw.platform;
+    if (raw.liquidity !== undefined) data.liquidity = raw.liquidity;
+    if (raw.confidence !== undefined) data.confidence = raw.confidence;
+    if (raw.pnl !== undefined) data.pnl = raw.pnl;
     const prisma = getPrismaClient();
     const market = await prisma.market.update({
       where: { id: req.params.id },
@@ -130,6 +232,7 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
   });
 
   app.delete("/api/markets/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireMarketCreatorOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
     await prisma.market.delete({ where: { id: req.params.id } }).catch(() => null);
     return reply.code(204).send();

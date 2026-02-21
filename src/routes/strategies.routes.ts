@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireStrategyAgentOwnerOrApiKey, requireAgentOwnerOrApiKeyById } from "../lib/permissions.js";
 import {
   agentStrategyCreateSchema,
   agentStrategyUpdateSchema,
@@ -23,6 +24,7 @@ export async function registerStrategyRoutes(app: FastifyInstance): Promise<void
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
     }
+    if (!(await requireAgentOwnerOrApiKeyById(req, reply, parsed.data.agentId))) return;
     const prisma = getPrismaClient();
     const agent = await prisma.agent.findUnique({ where: { id: parsed.data.agentId } });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
@@ -36,6 +38,7 @@ export async function registerStrategyRoutes(app: FastifyInstance): Promise<void
   });
 
   app.patch("/api/strategies/agent/:agentId", async (req: FastifyRequest<{ Params: { agentId: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!(await requireStrategyAgentOwnerOrApiKey(req, reply))) return;
     const parsed = agentStrategyUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -53,6 +56,7 @@ export async function registerStrategyRoutes(app: FastifyInstance): Promise<void
   });
 
   app.delete("/api/strategies/agent/:agentId", async (req: FastifyRequest<{ Params: { agentId: string } }>, reply: FastifyReply) => {
+    if (!(await requireStrategyAgentOwnerOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
     await prisma.agentStrategy.delete({ where: { agentId: req.params.agentId } }).catch(() => null);
     return reply.code(204).send();

@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireAgentOwnerOrApiKey, requireUserOrApiKey } from "../lib/permissions.js";
+import { requireUser, requireApiKey } from "../lib/auth.js";
 import {
   agentCreateSchema,
   agentUpdateSchema,
@@ -77,9 +79,15 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/api/agents", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
     const parsed = agentCreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
+    }
+    if (!requireApiKey(req)) {
+      const user = requireUser(req);
+      if (!user?.userId) return reply.code(403).send({ error: "User not found or not registered" });
+      if (parsed.data.ownerId !== user.userId) return reply.code(403).send({ error: "Forbidden: can only create agent for yourself" });
     }
     const prisma = getPrismaClient();
     const owner = await prisma.user.findUnique({ where: { id: parsed.data.ownerId } });
@@ -100,6 +108,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.patch("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const parsed = agentUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -129,6 +138,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
     await prisma.agent.delete({ where: { id: req.params.id } }).catch(() => null);
     return reply.code(204).send();

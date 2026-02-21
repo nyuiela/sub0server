@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { enqueueAgentPrediction } from "../workers/queue.js";
 import { getPrismaClient } from "../lib/prisma.js";
+import { requireAgentOwnerOrApiKeyById, requireUserOrApiKey } from "../lib/permissions.js";
 
 interface EnqueueBody {
   marketId: string;
@@ -9,10 +10,12 @@ interface EnqueueBody {
 
 export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: EnqueueBody }>("/api/agent/enqueue", async (req: FastifyRequest<{ Body: EnqueueBody }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
     const { marketId, agentId } = req.body ?? {};
     if (!marketId || !agentId) {
       return reply.code(400).send({ error: "marketId and agentId required" });
     }
+    if (!(await requireAgentOwnerOrApiKeyById(req, reply, agentId))) return;
     const prisma = getPrismaClient();
     const [market, agent] = await Promise.all([
       prisma.market.findUnique({ where: { id: marketId } }),

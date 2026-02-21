@@ -14,10 +14,12 @@ export const positionCreateSchema = z.object({
   avgPrice: z.string(),
   collateralLocked: z.string(),
   isAmm: z.boolean().optional().default(false),
+  contractPositionId: z.string().min(1).optional().nullable(),
 });
 
 export const positionUpdateSchema = z.object({
   status: positionStatusEnum.optional(),
+  contractPositionId: z.string().min(1).optional().nullable(),
 });
 
 export const positionQuerySchema = z.object({
