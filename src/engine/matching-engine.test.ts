@@ -11,7 +11,7 @@ describe("OrderBook", () => {
   let book: OrderBook;
 
   beforeEach(() => {
-    book = new OrderBook(MARKET);
+    book = new OrderBook(MARKET, 0);
   });
 
   describe("validation", () => {
@@ -19,6 +19,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: orderId(),
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -33,6 +34,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: orderId(),
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -46,6 +48,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: orderId(),
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 0,
@@ -61,6 +64,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: orderId(),
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -78,6 +82,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: orderId(),
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 101,
@@ -95,6 +100,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -103,6 +109,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -123,6 +130,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -131,6 +139,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -147,6 +156,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 99,
@@ -155,6 +165,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -168,6 +179,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-101",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 101,
@@ -176,6 +188,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-100",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -184,6 +197,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 101,
@@ -201,6 +215,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -209,6 +224,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-2",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -217,6 +233,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -235,6 +252,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -243,6 +261,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "MARKET",
         quantity: 5,
@@ -258,6 +277,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "MARKET",
         quantity: 10,
@@ -270,6 +290,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -278,6 +299,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "MARKET",
         quantity: 10,
@@ -294,6 +316,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,
@@ -302,6 +325,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "IOC",
         price: 100,
@@ -318,6 +342,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "IOC",
         price: 100,
@@ -342,6 +367,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -350,6 +376,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "bid-2",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -365,6 +392,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "bid-lo",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 98,
@@ -373,6 +401,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "bid-hi",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -381,6 +410,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-hi",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 102,
@@ -389,6 +419,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-lo",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 101,
@@ -407,6 +438,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 101,
@@ -415,6 +447,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 100,
@@ -432,6 +465,7 @@ describe("OrderBook", () => {
       book.processOrder({
         id: "bid-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "BID",
         type: "LIMIT",
         price: 99,
@@ -440,6 +474,7 @@ describe("OrderBook", () => {
       const result = book.processOrder({
         id: "ask-1",
         marketId: MARKET,
+        outcomeIndex: 0,
         side: "ASK",
         type: "LIMIT",
         price: 100,

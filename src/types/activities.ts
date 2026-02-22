@@ -9,6 +9,7 @@ export interface ActivityTradePayload {
   type: "trade";
   id: string;
   marketId: string;
+  outcomeIndex: number;
   userId: string | null;
   agentId: string | null;
   side: string;

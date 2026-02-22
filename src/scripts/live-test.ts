@@ -216,6 +216,7 @@ async function runOrderbookStake(): Promise<boolean> {
     method: "POST",
     body: {
       marketId: currentMarketId,
+      outcomeIndex: 0,
       side: "BID",
       type: "LIMIT",
       price: "0.4",
@@ -233,6 +234,7 @@ async function runOrderbookStake(): Promise<boolean> {
     method: "POST",
     body: {
       marketId: currentMarketId,
+      outcomeIndex: 0,
       side: "ASK",
       type: "LIMIT",
       price: "0.5",

@@ -210,6 +210,10 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
         creatorAddress: parsed.data.creatorAddress,
         context: parsed.data.context ?? undefined,
         outcomes: parsed.data.outcomes as object,
+        outcomePositionIds:
+          parsed.data.outcomePositionIds != null && parsed.data.outcomePositionIds.length > 0
+            ? (parsed.data.outcomePositionIds as object)
+            : undefined,
         sourceUrl: parsed.data.sourceUrl ?? undefined,
         resolutionDate: new Date(parsed.data.resolutionDate),
         oracleAddress: parsed.data.oracleAddress,

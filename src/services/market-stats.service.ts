@@ -95,11 +95,11 @@ export async function getMarketPositionIds(marketId: string): Promise<string[]> 
 }
 
 /**
- * Get order book stats for a market from the in-memory matching engine.
- * Active order count and liquidity (sum of price*quantity on each side).
+ * Get order book stats for one outcome of a market from the in-memory matching engine.
+ * outcomeIndex defaults to 0 (first listed option, e.g. Yes). Active order count and liquidity.
  */
-export function getOrderBookStatsForMarket(marketId: string): OrderBookStats {
-  const book = getOrderBook(marketId);
+export function getOrderBookStatsForMarket(marketId: string, outcomeIndex = 0): OrderBookStats {
+  const book = getOrderBook(marketId, outcomeIndex);
   const snapshot = book.getSnapshot();
   let bidLiquidity = "0";
   let askLiquidity = "0";

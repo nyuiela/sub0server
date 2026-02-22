@@ -55,6 +55,7 @@ export async function getActivities(query: ActivitiesQuery): Promise<{
           type: "trade",
           id: t.id,
           marketId: t.marketId,
+          outcomeIndex: t.outcomeIndex,
           userId: t.userId,
           agentId: t.agentId,
           side: t.side,

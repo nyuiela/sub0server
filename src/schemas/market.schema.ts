@@ -8,6 +8,8 @@ export const marketCreateSchema = z.object({
   creatorAddress: z.string().min(1),
   context: z.string().optional().nullable(),
   outcomes: z.array(z.unknown()),
+  /** CTF position/token id per outcome (same length as outcomes). Optional. */
+  outcomePositionIds: z.array(z.string()).optional(),
   sourceUrl: z.string().url().optional().nullable(),
   resolutionDate: z.string().datetime(),
   oracleAddress: z.string().min(1),

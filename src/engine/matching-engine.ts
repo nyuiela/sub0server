@@ -31,12 +31,13 @@ function toDecimal(v: string | number): DecimalInstance {
 }
 
 /**
- * In-memory order book for one market.
+ * In-memory order book for one (market, outcome). Each listed option has its own book.
  * - Bids: sorted by price descending, then time ascending (FIFO at each level).
  * - Asks: sorted by price ascending, then time ascending.
  */
 export class OrderBook {
   private readonly marketId: string;
+  private readonly outcomeIndex: number;
   /** Map: price key -> list of orders at that price (FIFO). */
   private readonly bids: Map<string, EngineOrder[]> = new Map();
   private readonly asks: Map<string, EngineOrder[]> = new Map();
@@ -46,8 +47,9 @@ export class OrderBook {
   private readonly askPrices: string[] = [];
   private orderCounter = 0;
 
-  constructor(marketId: string) {
+  constructor(marketId: string, outcomeIndex: number) {
     this.marketId = marketId;
+    this.outcomeIndex = outcomeIndex;
   }
 
   /**
@@ -170,17 +172,20 @@ export class OrderBook {
       maker.status = "PARTIALLY_FILLED";
     }
 
-    const tradeId = `trade-${this.marketId}-${++this.orderCounter}-${Date.now()}`;
+    const tradeId = `trade-${this.marketId}-${this.outcomeIndex}-${++this.orderCounter}-${Date.now()}`;
     return {
       id: tradeId,
       marketId: this.marketId,
+      outcomeIndex: this.outcomeIndex,
       price: new DecimalCtor(makerPriceStr).toFixed(DECIMAL_PLACES),
       quantity: fillQty.toFixed(DECIMAL_PLACES),
       makerOrderId: maker.id,
       takerOrderId: taker.id,
       side: taker.side,
-      userId: taker.userId ?? maker.userId,
-      agentId: taker.agentId ?? maker.agentId,
+      userId: taker.userId ?? undefined,
+      agentId: taker.agentId ?? undefined,
+      makerUserId: maker.userId ?? undefined,
+      makerAgentId: maker.agentId ?? undefined,
       executedAt,
     };
   }
@@ -197,6 +202,7 @@ export class OrderBook {
       const rejected: EngineOrder = {
         id: input.id,
         marketId: input.marketId,
+        outcomeIndex: input.outcomeIndex,
         side: input.side,
         type: input.type,
         price: "0",
@@ -219,6 +225,7 @@ export class OrderBook {
       const rejected: EngineOrder = {
         id: input.id,
         marketId: input.marketId,
+        outcomeIndex: input.outcomeIndex,
         side: input.side,
         type: input.type,
         price: "0",
@@ -237,6 +244,7 @@ export class OrderBook {
     const order: EngineOrder = {
       id: input.id,
       marketId: input.marketId,
+      outcomeIndex: input.outcomeIndex,
       side: input.side,
       type: input.type,
       price: priceStr,
@@ -297,6 +305,7 @@ export class OrderBook {
     }
     return {
       marketId: this.marketId,
+      outcomeIndex: this.outcomeIndex,
       bids,
       asks,
       timestamp: Date.now(),
@@ -304,18 +313,23 @@ export class OrderBook {
   }
 }
 
-/** Registry of order books by marketId. Single book per market. */
+/** Registry of order books by marketId:outcomeIndex. One book per listed option. */
 const books = new Map<string, OrderBook>();
 
+function bookKey(marketId: string, outcomeIndex: number): string {
+  return `${marketId}:${outcomeIndex}`;
+}
+
 /**
- * Get or create the order book for a market. Caller must ensure processOrder
- * for this marketId is only invoked from the single-threaded queue.
+ * Get or create the order book for one (market, outcome). Caller must ensure processOrder
+ * for this key is only invoked from the single-threaded queue for that key.
  */
-export function getOrderBook(marketId: string): OrderBook {
-  let book = books.get(marketId);
+export function getOrderBook(marketId: string, outcomeIndex: number): OrderBook {
+  const key = bookKey(marketId, outcomeIndex);
+  let book = books.get(key);
   if (book === undefined) {
-    book = new OrderBook(marketId);
-    books.set(marketId, book);
+    book = new OrderBook(marketId, outcomeIndex);
+    books.set(key, book);
   }
   return book;
 }

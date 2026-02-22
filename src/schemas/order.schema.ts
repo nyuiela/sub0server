@@ -5,6 +5,8 @@ const orderTypeEnum = z.enum(["LIMIT", "MARKET", "IOC"]);
 
 export const orderSubmitSchema = z.object({
   marketId: z.string().uuid(),
+  /** Which listed option (e.g. 0 = Yes, 1 = No). Each option has its own order book. */
+  outcomeIndex: z.number().int().min(0),
   side: orderSideEnum,
   type: orderTypeEnum,
   price: z.union([z.string(), z.number()]).optional(),

@@ -6,8 +6,8 @@ Reference for frontend integration: submitting orders, how trades are stored, an
 
 ## Overview
 
-- **Orders**: Submitted via `POST /api/orders`. Each order is processed by the matching engine and then persisted to the database (status, amount, price, etc.). There is no dedicated "list orders" REST endpoint in the current API.
-- **Trades**: Trades are created when orders match (buy vs sell). They are persisted to the database in a background worker. There is no dedicated "list trades" REST endpoint; trade data is available via market stats and real-time WebSocket events.
+- **Orders**: Submitted via `POST /api/orders`. Each order is for one **listed option** (outcome) of a market (e.g. outcome 0 = Yes, 1 = No). Buy/sell is per option: you buy or sell tokens for that outcome. Orders are processed per (market, outcome) and persisted with `outcomeIndex`. There is no dedicated "list orders" REST endpoint.
+- **Trades**: Trades are created when orders match (buy vs sell) for the same outcome. They are persisted with `outcomeIndex`. A background worker also creates or updates **Position** records (LONG/SHORT per outcome) when trades execute.
 
 ---
 
@@ -17,7 +17,7 @@ Reference for frontend integration: submitting orders, how trades are stored, an
 
 **`POST /api/orders`**
 
-Submit a buy (BID) or sell (ASK) order for a market. The order is processed sequentially per market; the response includes the order id, any trades that executed immediately, and the updated order book snapshot.
+Submit a buy (BID) or sell (ASK) order for **one listed option** of a market (e.g. Yes token = outcome 0, No token = outcome 1). Each option has its own order book. The order is processed for that (market, outcome); the response includes the order id, any trades that executed, and the updated order book snapshot for that outcome.
 
 **Authentication:** Either a logged-in user (JWT) or an API key.
 
@@ -26,25 +26,27 @@ Submit a buy (BID) or sell (ASK) order for a market. The order is processed sequ
 
 **Request body**
 
-| Field     | Type   | Required | Description |
-|-----------|--------|----------|-------------|
-| marketId  | string | Yes      | UUID of the market. |
-| side      | string | Yes      | `"BID"` (buy) or `"ASK"` (sell). |
-| type      | string | Yes      | `"LIMIT"`, `"MARKET"`, or `"IOC"`. |
-| price     | string or number | For LIMIT only | Limit price. Required when `type` is `LIMIT`. |
-| quantity  | string or number | Yes | Order size. |
-| userId    | string | No (API key only) | UUID of the user. When using user auth (JWT), this is set from the token; do not send it. |
-| agentId   | string | No (API key only) | UUID of the agent. Only accepted when using API key. |
+| Field         | Type   | Required | Description |
+|---------------|--------|----------|-------------|
+| marketId      | string | Yes      | UUID of the market. |
+| outcomeIndex  | number | Yes      | Index of the listed option (e.g. 0 = Yes, 1 = No). Must be &lt; market's outcome count. |
+| side          | string | Yes      | `"BID"` (buy this option) or `"ASK"` (sell this option). |
+| type          | string | Yes      | `"LIMIT"`, `"MARKET"`, or `"IOC"`. |
+| price         | string or number | For LIMIT only | Limit price. Required when `type` is `LIMIT`. |
+| quantity      | string or number | Yes | Order size. |
+| userId        | string | No (API key only) | UUID of the user. When using user auth (JWT), this is set from the token; do not send it. |
+| agentId       | string | No (API key only) | UUID of the agent. Only accepted when using API key. |
 
 - **LIMIT**: Resting order at the given price; can fill immediately if the book has a matching opposite side.
 - **MARKET**: Fills at best available price(s); no resting quantity.
 - **IOC** (Immediate-or-Cancel): Fills what is available now and cancels the rest.
 
-**Example**
+**Example** (buy Yes tokens at 0.45)
 
 ```json
 {
   "marketId": "550e8400-e29b-41d4-a716-446655440000",
+  "outcomeIndex": 0,
   "side": "BID",
   "type": "LIMIT",
   "price": "0.45",
@@ -61,6 +63,7 @@ Submit a buy (BID) or sell (ASK) order for a market. The order is processed sequ
     {
       "id": "trade-...",
       "marketId": "550e8400-e29b-41d4-a716-446655440000",
+      "outcomeIndex": 0,
       "price": "0.45",
       "quantity": "50.000000000000000000",
       "makerOrderId": "uuid-of-resting-order",
@@ -73,6 +76,7 @@ Submit a buy (BID) or sell (ASK) order for a market. The order is processed sequ
   ],
   "snapshot": {
     "marketId": "550e8400-e29b-41d4-a716-446655440000",
+    "outcomeIndex": 0,
     "bids": [{ "price": "0.45", "quantity": "50.000000000000000000", "orderCount": 1 }],
     "asks": [],
     "timestamp": 1734567890123
@@ -82,19 +86,20 @@ Submit a buy (BID) or sell (ASK) order for a market. The order is processed sequ
 
 - **orderId**: Server-generated UUID for this order. The order is stored in the database after processing (status: e.g. `FILLED`, `PARTIALLY_FILLED`, `LIVE`, `REJECTED`, `CANCELLED`).
 - **trades**: Array of trades that executed for this order (taker vs maker). May be empty if the order did not match or is resting.
-- **snapshot**: Order book state for the market after this order was applied.
+- **snapshot**: Order book state for that (market, outcome) after this order was applied. Includes `outcomeIndex`.
 
 **Errors**
 
-- **400**: Validation failed (e.g. missing `price` for LIMIT, invalid body). Response includes `error` and `details`.
+- **400**: Validation failed (e.g. missing `price` for LIMIT, invalid body, `outcomeIndex` out of range). Response includes `error` and `details` or `message`.
+- **404**: Market not found.
 - **401**: Not authenticated. Send a valid JWT (cookie/Authorization/query) or API key.
 - **403**: User not registered (JWT valid but user not in DB). Complete registration before placing orders.
 - **500**: Order processing failed. Response includes `error` and `message`.
 
 **Persistence**
 
-- Every processed order is written to the database (Order table: id, marketId, side, amount, price, status, createdAt, updatedAt).
-- When an order matches, resulting trades are enqueued and persisted by a background worker (Trade table). Market volume is updated accordingly.
+- Every processed order is written to the database (Order table: id, marketId, outcomeIndex, side, amount, price, status, createdAt, updatedAt).
+- When an order matches, resulting trades are enqueued and persisted (Trade table: id, marketId, outcomeIndex, side, amount, price, etc.). The same worker creates or updates **Position** records for buyer (LONG +qty) and seller (LONG -qty or SHORT +qty) for that outcome, using the market's `outcomePositionIds` (CTF position id per outcome) when available. Market volume is updated accordingly.
 
 ---
 

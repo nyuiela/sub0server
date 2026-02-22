@@ -64,26 +64,28 @@ export class SocketManager {
           return;
         }
         if (channel === REDIS_CHANNELS.ORDER_BOOK_UPDATE) {
-          const { marketId, snapshot } = JSON.parse(message) as {
+          const { marketId, outcomeIndex, snapshot } = JSON.parse(message) as {
             marketId: string;
+            outcomeIndex: number;
             snapshot: OrderBookUpdatePayload;
           };
           const room = `${ROOM_PREFIX}${marketId}`;
           this.broadcastToLocalRoom(room, {
             type: WS_EVENT_NAMES.ORDER_BOOK_UPDATE,
-            payload: { ...snapshot, marketId },
+            payload: { ...snapshot, marketId, outcomeIndex: outcomeIndex ?? snapshot.outcomeIndex },
           });
           return;
         }
         if (channel === REDIS_CHANNELS.TRADES) {
           const { trade } = JSON.parse(message) as {
-            trade: { marketId: string; side: string; quantity: string; price: string; executedAt: number; userId?: string; agentId?: string };
+            trade: { marketId: string; outcomeIndex?: number; side: string; quantity: string; price: string; executedAt: number; userId?: string; agentId?: string };
           };
           const room = `${ROOM_PREFIX}${trade.marketId}`;
           this.broadcastToLocalRoom(room, {
             type: WS_EVENT_NAMES.TRADE_EXECUTED,
             payload: {
               marketId: trade.marketId,
+              outcomeIndex: trade.outcomeIndex,
               side: trade.side === "BID" ? "long" : "short",
               size: trade.quantity,
               price: trade.price,

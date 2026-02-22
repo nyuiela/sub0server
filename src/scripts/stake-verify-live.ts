@@ -152,6 +152,7 @@ async function main(): Promise<void> {
     method: "POST",
     body: {
       marketId,
+      outcomeIndex: 0,
       side: "BID",
       type: "LIMIT",
       price,
@@ -170,6 +171,7 @@ async function main(): Promise<void> {
     method: "POST",
     body: {
       marketId,
+      outcomeIndex: 0,
       side: "ASK",
       type: "LIMIT",
       price,

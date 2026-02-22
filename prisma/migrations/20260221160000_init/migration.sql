@@ -1,8 +1,14 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateEnum
 CREATE TYPE "AgentStatus" AS ENUM ('ACTIVE', 'PAUSED', 'DEPLETED', 'EXPIRED');
 
 -- CreateEnum
 CREATE TYPE "MarketStatus" AS ENUM ('OPEN', 'RESOLVING', 'CLOSED', 'DISPUTED');
+
+-- CreateEnum
+CREATE TYPE "MarketPlatform" AS ENUM ('NATIVE', 'POLYMARKET', 'KALSHI', 'MANIFOLD', 'OTHER');
 
 -- CreateEnum
 CREATE TYPE "PositionSide" AS ENUM ('LONG', 'SHORT');
@@ -19,6 +25,7 @@ CREATE TABLE "User" (
     "username" TEXT,
     "address" TEXT NOT NULL,
     "email" TEXT,
+    "imageUrl" TEXT,
     "authMethod" TEXT,
     "totalVolume" DECIMAL(28,8) NOT NULL DEFAULT 0,
     "pnl" DECIMAL(28,8) NOT NULL DEFAULT 0,
@@ -78,6 +85,7 @@ CREATE TABLE "Template" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "persona" TEXT,
+    "imageUrl" TEXT,
     "config" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -92,13 +100,19 @@ CREATE TABLE "Market" (
     "creatorAddress" TEXT NOT NULL,
     "volume" DECIMAL(28,8) NOT NULL DEFAULT 0,
     "context" TEXT,
+    "imageUrl" TEXT,
     "outcomes" JSONB NOT NULL,
+    "outcomePositionIds" JSONB,
     "sourceUrl" TEXT,
     "resolutionDate" TIMESTAMP(3) NOT NULL,
     "oracleAddress" TEXT NOT NULL,
     "status" "MarketStatus" NOT NULL DEFAULT 'OPEN',
     "collateralToken" TEXT NOT NULL,
     "conditionId" TEXT NOT NULL,
+    "platform" "MarketPlatform" NOT NULL DEFAULT 'NATIVE',
+    "liquidity" DECIMAL(28,8),
+    "confidence" DOUBLE PRECISION,
+    "pnl" DECIMAL(28,8),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -119,6 +133,7 @@ CREATE TABLE "Position" (
     "avgPrice" DECIMAL(28,18) NOT NULL,
     "collateralLocked" DECIMAL(28,18) NOT NULL,
     "isAmm" BOOLEAN NOT NULL DEFAULT false,
+    "contractPositionId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -129,6 +144,7 @@ CREATE TABLE "Position" (
 CREATE TABLE "Trade" (
     "id" TEXT NOT NULL,
     "marketId" TEXT NOT NULL,
+    "outcomeIndex" INTEGER NOT NULL DEFAULT 0,
     "userId" TEXT,
     "agentId" TEXT,
     "side" TEXT NOT NULL,
@@ -144,6 +160,7 @@ CREATE TABLE "Trade" (
 CREATE TABLE "Order" (
     "id" TEXT NOT NULL,
     "marketId" TEXT NOT NULL,
+    "outcomeIndex" INTEGER NOT NULL DEFAULT 0,
     "side" TEXT NOT NULL,
     "amount" DECIMAL(28,18) NOT NULL,
     "price" DECIMAL(28,18) NOT NULL,
@@ -160,6 +177,7 @@ CREATE TABLE "News" (
     "marketId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "body" TEXT,
+    "imageUrl" TEXT,
     "sourceUrl" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -206,6 +224,7 @@ CREATE TABLE "Tool" (
     "name" TEXT NOT NULL,
     "url" TEXT NOT NULL,
     "description" TEXT NOT NULL,
+    "imageUrl" TEXT,
     "fee" DECIMAL(28,8) NOT NULL,
     "receiverAddress" TEXT NOT NULL,
     "inputSchema" JSONB NOT NULL,
@@ -260,6 +279,9 @@ CREATE INDEX "Market_status_idx" ON "Market"("status");
 CREATE INDEX "Market_conditionId_idx" ON "Market"("conditionId");
 
 -- CreateIndex
+CREATE INDEX "Market_platform_idx" ON "Market"("platform");
+
+-- CreateIndex
 CREATE INDEX "Position_marketId_idx" ON "Position"("marketId");
 
 -- CreateIndex
@@ -275,6 +297,9 @@ CREATE INDEX "Position_address_idx" ON "Position"("address");
 CREATE INDEX "Trade_marketId_idx" ON "Trade"("marketId");
 
 -- CreateIndex
+CREATE INDEX "Trade_marketId_outcomeIndex_idx" ON "Trade"("marketId", "outcomeIndex");
+
+-- CreateIndex
 CREATE INDEX "Trade_userId_idx" ON "Trade"("userId");
 
 -- CreateIndex
@@ -282,6 +307,9 @@ CREATE INDEX "Trade_agentId_idx" ON "Trade"("agentId");
 
 -- CreateIndex
 CREATE INDEX "Order_marketId_idx" ON "Order"("marketId");
+
+-- CreateIndex
+CREATE INDEX "Order_marketId_outcomeIndex_idx" ON "Order"("marketId", "outcomeIndex");
 
 -- CreateIndex
 CREATE INDEX "News_marketId_idx" ON "News"("marketId");

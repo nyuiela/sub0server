@@ -21,6 +21,7 @@ import type { OrderInput, ExecutedTrade, OrderBookSnapshot } from "../types/orde
 /** Payload published to Redis for ORDER_BOOK_UPDATE. */
 export interface OrderBookUpdateMessage {
   marketId: string;
+  outcomeIndex: number;
   snapshot: OrderBookSnapshot;
 }
 
@@ -44,30 +45,39 @@ interface MarketQueue {
 
 const queues = new Map<string, MarketQueue>();
 
-function getOrCreateQueue(marketId: string): MarketQueue {
-  let q = queues.get(marketId);
+function queueKey(marketId: string, outcomeIndex: number): string {
+  return `${marketId}:${outcomeIndex}`;
+}
+
+function getOrCreateQueue(marketId: string, outcomeIndex: number): MarketQueue {
+  const key = queueKey(marketId, outcomeIndex);
+  let q = queues.get(key);
   if (q === undefined) {
     q = { pending: [], processing: false };
-    queues.set(marketId, q);
+    queues.set(key, q);
   }
   return q;
 }
 
 /**
  * Process one order: run matching engine, publish events, return trades.
- * Called only from drainQueue for this market (single-threaded per market).
+ * Called only from drainQueue for this (market, outcome) (single-threaded per book).
  */
-async function processOne(marketId: string, input: OrderInput): Promise<{
+async function processOne(marketId: string, outcomeIndex: number, input: OrderInput): Promise<{
   trades: ExecutedTrade[];
   snapshot: OrderBookSnapshot;
 }> {
-  const book = getOrderBook(marketId);
+  const book = getOrderBook(marketId, outcomeIndex);
   const result = book.processOrder(input);
   const redis = await getRedisPublisher();
 
   await redis.publish(
     REDIS_CHANNELS.ORDER_BOOK_UPDATE,
-    JSON.stringify({ marketId, snapshot: result.orderBookSnapshot } as OrderBookUpdateMessage)
+    JSON.stringify({
+      marketId,
+      outcomeIndex,
+      snapshot: result.orderBookSnapshot,
+    } as OrderBookUpdateMessage)
   );
 
   await redis.publish(
@@ -90,44 +100,42 @@ async function processOne(marketId: string, input: OrderInput): Promise<{
 }
 
 /**
- * Drain this market's queue: take the next order, process it, then recurse
- * if more are pending. Only one drain runs per market at a time (processing
- * flag). This is the single thread of execution for this market's book.
+ * Drain this (market, outcome)'s queue: take the next order, process it, then recurse
+ * if more are pending. Only one drain runs per book at a time (processing flag).
  */
-async function drainQueue(marketId: string): Promise<void> {
-  const q = getOrCreateQueue(marketId);
+async function drainQueue(marketId: string, outcomeIndex: number): Promise<void> {
+  const q = getOrCreateQueue(marketId, outcomeIndex);
   if (q.processing || q.pending.length === 0) return;
 
   q.processing = true;
   const next = q.pending.shift()!;
 
   try {
-    const { trades, snapshot } = await processOne(marketId, next.input);
+    const { trades, snapshot } = await processOne(marketId, outcomeIndex, next.input);
     next.resolve({ trades, snapshot });
   } catch (err) {
     next.reject(err instanceof Error ? err : new Error(String(err)));
   } finally {
     q.processing = false;
     if (q.pending.length > 0) {
-      setImmediate(() => drainQueue(marketId));
+      setImmediate(() => drainQueue(marketId, outcomeIndex));
     }
   }
 }
 
 /**
- * Submit an order for a market. It is appended to that market's queue and
- * processed in FIFO order, one at a time. Returns a promise that resolves
- * when this order has been processed (trades + snapshot).
+ * Submit an order for one outcome of a market. It is appended to that outcome's queue and
+ * processed in FIFO order. Returns a promise that resolves when this order has been processed.
  */
 export function submitOrder(input: OrderInput): Promise<{
   trades: ExecutedTrade[];
   snapshot: OrderBookSnapshot;
 }> {
-  const marketId = input.marketId;
-  const q = getOrCreateQueue(marketId);
+  const { marketId, outcomeIndex } = input;
+  const q = getOrCreateQueue(marketId, outcomeIndex);
 
   return new Promise((resolve, reject) => {
     q.pending.push({ input, resolve, reject });
-    setImmediate(() => drainQueue(marketId));
+    setImmediate(() => drainQueue(marketId, outcomeIndex));
   });
 }

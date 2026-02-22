@@ -1,17 +1,185 @@
 /**
  * Background worker: batch-insert executed trades from the matching engine into PostgreSQL.
  * Consumes jobs from the trades queue; each job contains one or more trades from processOrder.
- * Does not write synchronously from the matching path; the engine only enqueues here.
- * After persisting, increments Market.volume per market and publishes MARKET_UPDATES for frontends.
+ * Applies each fill to positions (buy = LONG +qty, sell = LONG -qty or SHORT +qty).
+ * After persisting, increments Market.volume and publishes MARKET_UPDATES.
  */
 
 import { Worker, type Job } from "bullmq";
+import { Decimal } from "decimal.js";
 import { config } from "../config/index.js";
 import { REDIS_CHANNELS } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { getRedisPublisher } from "../lib/redis.js";
+import type { PrismaClient } from "@prisma/client";
 import type { ExecutedTrade, EngineOrder } from "../types/order-book.js";
 import { TRADES_QUEUE_NAME, type TradesJobPayload } from "./trades-queue.js";
+
+async function resolveAddress(
+  prisma: PrismaClient,
+  userId: string | null | undefined,
+  agentId: string | null | undefined
+): Promise<string | null> {
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { address: true } });
+    return user?.address ?? null;
+  }
+  if (agentId) {
+    const agent = await prisma.agent.findUnique({
+      where: { id: agentId },
+      select: { owner: { select: { address: true } } },
+    });
+    return agent?.owner?.address ?? null;
+  }
+  return null;
+}
+
+/**
+ * Apply each trade to buyer and seller positions for that outcome.
+ * Buyer (BID taker or ASK maker): LONG position +quantity.
+ * Seller (ASK maker or BID taker): LONG -quantity or SHORT +quantity.
+ */
+async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrade[]): Promise<void> {
+  for (const t of trades) {
+    const qty = new Decimal(t.quantity);
+    const price = new Decimal(t.price);
+    const buyerUserId = t.side === "BID" ? t.userId : t.makerUserId;
+    const buyerAgentId = t.side === "BID" ? t.agentId : t.makerAgentId;
+    const sellerUserId = t.side === "ASK" ? t.userId : t.makerUserId;
+    const sellerAgentId = t.side === "ASK" ? t.agentId : t.makerAgentId;
+    const buyerAddress = await resolveAddress(prisma, buyerUserId, buyerAgentId);
+    const sellerAddress = await resolveAddress(prisma, sellerUserId, sellerAgentId);
+
+    const market = await prisma.market.findUnique({
+      where: { id: t.marketId },
+      select: { collateralToken: true, outcomePositionIds: true },
+    });
+    const collateralToken = market?.collateralToken ?? "";
+    const outcomePositionIds = market?.outcomePositionIds as string[] | null;
+    const contractPositionId =
+      Array.isArray(outcomePositionIds) && t.outcomeIndex < outcomePositionIds.length
+        ? outcomePositionIds[t.outcomeIndex] ?? null
+        : null;
+
+    if (buyerAddress) {
+      const existing = await prisma.position.findFirst({
+        where: {
+          marketId: t.marketId,
+          outcomeIndex: t.outcomeIndex,
+          address: buyerAddress,
+          side: "LONG",
+          status: "OPEN",
+        },
+      });
+      const newLocked = existing
+        ? new Decimal(existing.collateralLocked.toString()).plus(qty)
+        : qty;
+      const newAvg =
+        existing && new Decimal(existing.collateralLocked.toString()).gt(0)
+          ? new Decimal(existing.avgPrice.toString())
+              .times(existing.collateralLocked.toString())
+              .plus(price.times(t.quantity))
+              .div(newLocked)
+          : price;
+      if (existing) {
+        await prisma.position.update({
+          where: { id: existing.id },
+          data: {
+            avgPrice: newAvg.toFixed(18),
+            collateralLocked: newLocked.toFixed(18),
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        await prisma.position.create({
+          data: {
+            marketId: t.marketId,
+            outcomeIndex: t.outcomeIndex,
+            address: buyerAddress,
+            userId: buyerUserId ?? undefined,
+            agentId: buyerAgentId ?? undefined,
+            tokenAddress: collateralToken,
+            contractPositionId,
+            side: "LONG",
+            status: "OPEN",
+            avgPrice: newAvg.toFixed(18),
+            collateralLocked: newLocked.toFixed(18),
+            isAmm: false,
+          },
+        });
+      }
+    }
+
+    if (sellerAddress) {
+      const longPos = await prisma.position.findFirst({
+        where: {
+          marketId: t.marketId,
+          outcomeIndex: t.outcomeIndex,
+          address: sellerAddress,
+          side: "LONG",
+          status: "OPEN",
+        },
+      });
+      if (longPos) {
+        const current = new Decimal(longPos.collateralLocked.toString());
+        const after = current.minus(qty);
+        if (after.lte(0)) {
+          await prisma.position.update({
+            where: { id: longPos.id },
+            data: {
+              collateralLocked: "0",
+              status: "CLOSED",
+              updatedAt: new Date(),
+            },
+          });
+          if (after.lt(0)) {
+            await prisma.position.create({
+              data: {
+                marketId: t.marketId,
+                outcomeIndex: t.outcomeIndex,
+                address: sellerAddress,
+                userId: sellerUserId ?? undefined,
+                agentId: sellerAgentId ?? undefined,
+                tokenAddress: collateralToken,
+                contractPositionId,
+                side: "SHORT",
+                status: "OPEN",
+                avgPrice: price.toFixed(18),
+                collateralLocked: after.abs().toFixed(18),
+                isAmm: false,
+              },
+            });
+          }
+        } else {
+          await prisma.position.update({
+            where: { id: longPos.id },
+            data: {
+              collateralLocked: after.toFixed(18),
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } else {
+        await prisma.position.create({
+          data: {
+            marketId: t.marketId,
+            outcomeIndex: t.outcomeIndex,
+            address: sellerAddress,
+            userId: sellerUserId ?? undefined,
+            agentId: sellerAgentId ?? undefined,
+            tokenAddress: collateralToken,
+            contractPositionId,
+            side: "SHORT",
+            status: "OPEN",
+            avgPrice: price.toFixed(18),
+            collateralLocked: qty.toFixed(18),
+            isAmm: false,
+          },
+        });
+      }
+    }
+  }
+}
 
 function volumeDeltaByMarket(trades: ExecutedTrade[]): Map<string, number> {
   const byMarket = new Map<string, number>();
@@ -35,6 +203,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
       create: {
         id: order.id,
         marketId: order.marketId,
+        outcomeIndex: order.outcomeIndex,
         side: order.side,
         amount: order.quantity,
         price: order.price,
@@ -56,6 +225,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
     data: trades.map((t: ExecutedTrade) => ({
       id: t.id,
       marketId: t.marketId,
+      outcomeIndex: t.outcomeIndex,
       userId: t.userId ?? undefined,
       agentId: t.agentId ?? undefined,
       side: t.side,
@@ -65,6 +235,8 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
     })),
     skipDuplicates: true,
   });
+
+  await applyTradesToPositions(prisma, trades);
 
   const volumeDeltas = volumeDeltaByMarket(trades);
   const marketIds = [...volumeDeltas.keys()];

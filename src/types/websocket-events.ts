@@ -39,6 +39,7 @@ export interface MarketUpdatedPayload {
 export interface TradeExecutedPayload {
   positionId?: string;
   marketId: string;
+  outcomeIndex?: number;
   side: "long" | "short";
   size: string;
   price: string;
@@ -47,9 +48,10 @@ export interface TradeExecutedPayload {
   executedAt: string;
 }
 
-/** Order book snapshot from matching engine (ORDER_BOOK_UPDATE). */
+/** Order book snapshot from matching engine (ORDER_BOOK_UPDATE). One per outcome (e.g. Yes=0, No=1). */
 export interface OrderBookUpdatePayload {
   marketId: string;
+  outcomeIndex: number;
   bids: { price: string; quantity: string; orderCount?: number }[];
   asks: { price: string; quantity: string; orderCount?: number }[];
   timestamp: number;

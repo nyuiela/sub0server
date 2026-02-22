@@ -30,6 +30,8 @@ export type OrderStatus =
 export interface EngineOrder {
   id: string;
   marketId: string;
+  /** Which outcome (option) this order is for; e.g. 0 = Yes, 1 = No. */
+  outcomeIndex: number;
   side: OrderSide;
   type: OrderType;
   /** Limit price; required for LIMIT, "0" for MARKET/IOC. */
@@ -47,10 +49,12 @@ export interface EngineOrder {
 
 /**
  * Input order as submitted to the matching engine. price may be omitted for MARKET.
+ * outcomeIndex identifies which listed option (e.g. Yes=0, No=1) is being bought/sold.
  */
 export interface OrderInput {
   id: string;
   marketId: string;
+  outcomeIndex: number;
   side: OrderSide;
   type: OrderType;
   price?: string | number;
@@ -66,6 +70,8 @@ export interface OrderInput {
 export interface ExecutedTrade {
   id: string;
   marketId: string;
+  /** Which outcome (option) was traded; e.g. 0 = Yes, 1 = No. */
+  outcomeIndex: number;
   /** Price at which the trade occurred (maker's price). */
   price: string;
   quantity: string;
@@ -74,8 +80,12 @@ export interface ExecutedTrade {
   /** Order that took liquidity (taker). */
   takerOrderId: string;
   side: "BID" | "ASK";
+  /** Taker (buyer/seller who hit the book). */
   userId?: string | null;
   agentId?: string | null;
+  /** Maker (resting order); for position updates. */
+  makerUserId?: string | null;
+  makerAgentId?: string | null;
   executedAt: number;
 }
 
@@ -89,11 +99,13 @@ export interface OrderBookLevel {
 }
 
 /**
- * Full order book snapshot for a market. Used for ORDER_BOOK_UPDATE events
+ * Full order book snapshot for one outcome of a market. Used for ORDER_BOOK_UPDATE events
  * and for debugging / REST APIs.
  */
 export interface OrderBookSnapshot {
   marketId: string;
+  /** Which outcome (option) this book is for; e.g. 0 = Yes, 1 = No. */
+  outcomeIndex: number;
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
   timestamp: number;

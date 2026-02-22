@@ -135,25 +135,26 @@ model Template {
 }
 
 model Market {
-  id              String          @id @default(uuid())
-  name            String
-  creatorAddress  String
-  volume          Decimal         @default(0) @db.Decimal(28, 8)
-  context         String?
-  imageUrl        String?
-  outcomes        Json
-  sourceUrl       String?
-  resolutionDate  DateTime
-  oracleAddress   String
-  status          MarketStatus    @default(OPEN)
-  collateralToken String
-  conditionId     String          @unique
-  platform        MarketPlatform  @default(NATIVE)
-  liquidity       Decimal?        @db.Decimal(28, 8)
-  confidence      Float?
-  pnl             Decimal?       @db.Decimal(28, 8)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                  String          @id @default(uuid())
+  name                String
+  creatorAddress      String
+  volume              Decimal         @default(0) @db.Decimal(28, 8)
+  context             String?
+  imageUrl            String?
+  outcomes            Json
+  outcomePositionIds Json?           // CTF position/token id per outcome (same length as outcomes)
+  sourceUrl           String?
+  resolutionDate      DateTime
+  oracleAddress       String
+  status              MarketStatus    @default(OPEN)
+  collateralToken     String
+  conditionId         String          @unique
+  platform            MarketPlatform  @default(NATIVE)
+  liquidity           Decimal?        @db.Decimal(28, 8)
+  confidence          Float?
+  pnl                 Decimal?       @db.Decimal(28, 8)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   trades    Trade[]
   positions Position[]
@@ -195,38 +196,42 @@ model Position {
 }
 
 model Trade {
-  id         String   @id @default(uuid())
-  marketId   String
-  userId     String?
-  agentId    String?
-  side       String
-  amount     Decimal  @db.Decimal(28, 18)
-  price      Decimal  @db.Decimal(28, 18)
-  txHash     String?
-  createdAt  DateTime @default(now())
+  id           String   @id @default(uuid())
+  marketId     String
+  outcomeIndex Int      @default(0)
+  userId       String?
+  agentId      String?
+  side         String
+  amount       Decimal  @db.Decimal(28, 18)
+  price        Decimal  @db.Decimal(28, 18)
+  txHash       String?
+  createdAt    DateTime @default(now())
 
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
   market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
 
   @@index([marketId])
+  @@index([marketId, outcomeIndex])
   @@index([userId])
   @@index([agentId])
 }
 
 model Order {
-  id        String   @id @default(uuid())
-  marketId  String
-  side      String
-  amount    Decimal  @db.Decimal(28, 18)
-  price     Decimal  @db.Decimal(28, 18)
-  status    String   @default("PENDING")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  marketId     String
+  outcomeIndex Int      @default(0)
+  side         String
+  amount       Decimal  @db.Decimal(28, 18)
+  price        Decimal  @db.Decimal(28, 18)
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
 
   @@index([marketId])
+  @@index([marketId, outcomeIndex])
 }
 
 model News {
