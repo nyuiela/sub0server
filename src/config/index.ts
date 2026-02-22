@@ -59,6 +59,14 @@ function makeConfig() {
       if (o === "true" || o === "*") return true;
       return o ?? "http://localhost:3000";
     },
+    /** Platform liquidity: address that holds positions used to fill MARKET orders. If unset, no platform fill. */
+    get platformLiquidityAddress(): string | undefined {
+      return process.env.PLATFORM_LIQUIDITY_ADDRESS ?? undefined;
+    },
+    /** Initial LONG size per outcome when creating platform positions on market create. */
+    get platformInitialLiquidityPerOutcome(): number {
+      return Number(optionalEnv("PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME", "10000"));
+    },
   };
 }
 

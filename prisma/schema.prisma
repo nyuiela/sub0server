@@ -222,6 +222,7 @@ model Order {
   marketId     String
   outcomeIndex Int      @default(0)
   side         String
+  type         String   @default("LIMIT")
   amount       Decimal  @db.Decimal(28, 18)
   price        Decimal  @db.Decimal(28, 18)
   status       String   @default("PENDING")

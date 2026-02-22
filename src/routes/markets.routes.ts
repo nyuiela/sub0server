@@ -19,6 +19,14 @@ import {
   type MarketStatsRow,
 } from "../services/market-stats.service.js";
 import { getMarketHolders, getMarketTraders } from "../services/activities.service.js";
+import { createPlatformPositionsForMarket } from "../services/platform-positions.service.js";
+import { getMarketPrices, getMarketQuote } from "../services/lmsr-prices.service.js";
+import {
+  marketPricesQuerySchema,
+  marketQuoteQuerySchema,
+  type MarketPricesQueryInput,
+  type MarketQuoteQueryInput,
+} from "../schemas/price.schema.js";
 
 function serializeMarket(market: {
   id: string;
@@ -120,7 +128,10 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     const prisma = getPrismaClient();
     const market = await prisma.market.findUnique({
       where: { id: req.params.id },
-      include: { positions: { take: 10 }, orders: { take: 5 } },
+      include: {
+        positions: { take: 10 },
+        orders: { take: 20, orderBy: { createdAt: "desc" } },
+      },
     });
     if (!market) return reply.code(404).send({ error: "Market not found" });
     const [statsMap, positionIds, orderBook] = await Promise.all([
@@ -167,6 +178,54 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     const traders = await getMarketTraders(market.id);
     return reply.send({ data: traders });
   });
+
+  app.get(
+    "/api/markets/:id/prices/quote",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: MarketQuoteQueryInput;
+      }>,
+      reply: FastifyReply
+    ) => {
+      const parsed = marketQuoteQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+      const quote = await getMarketQuote(
+        req.params.id,
+        parsed.data.outcomeIndex,
+        parsed.data.side,
+        parsed.data.quantity
+      );
+      if (!quote) {
+        return reply.code(404).send({
+          error: "Market not found or quote unavailable",
+          message: "Check market id and outcomeIndex, or insufficient liquidity for sell",
+        });
+      }
+      return reply.send(quote);
+    }
+  );
+
+  app.get(
+    "/api/markets/:id/prices",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: MarketPricesQueryInput;
+      }>,
+      reply: FastifyReply
+    ) => {
+      const parsed = marketPricesQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+      const prices = await getMarketPrices(req.params.id, parsed.data.quantity);
+      if (!prices) return reply.code(404).send({ error: "Market not found" });
+      return reply.send(prices);
+    }
+  );
 
   app.get("/api/markets/condition/:conditionId", async (req: FastifyRequest<{ Params: { conditionId: string } }>, reply: FastifyReply) => {
     const prisma = getPrismaClient();
@@ -222,6 +281,15 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
         platform: parsed.data.platform ?? "NATIVE",
       },
     });
+    const outcomes = market.outcomes as unknown[];
+    const outcomeCount = Array.isArray(outcomes) ? outcomes.length : 0;
+    const outcomePositionIds = market.outcomePositionIds as string[] | null;
+    await createPlatformPositionsForMarket(
+      market.id,
+      outcomeCount,
+      market.collateralToken,
+      Array.isArray(outcomePositionIds) ? outcomePositionIds : null
+    );
     await broadcastMarketUpdate({
       marketId: market.id,
       reason: MARKET_UPDATE_REASON.CREATED,

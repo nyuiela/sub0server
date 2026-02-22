@@ -176,6 +176,99 @@ Same market shape as in the list (including all stats), plus:
 
 ---
 
+## 2b. Get all prices for a market (LMSR)
+
+**`GET /api/markets/:id/prices`**
+
+Returns LMSR-derived prices for all options (outcomes) of the market. State is built from **Position** records (net LONG minus SHORT per outcome) and **Market.liquidity** as the LMSR liquidity parameter `b`. Public.
+
+### Query parameters
+
+| Parameter  | Type   | Required | Default | Description |
+|------------|--------|----------|---------|-------------|
+| `quantity` | string | No       | `"1"`   | Quantity used for each option's buy/sell quote. |
+
+### Response (200)
+
+```json
+{
+  "marketId": "uuid",
+  "outcomes": ["Yes", "No"],
+  "liquidityParameter": "100",
+  "quantities": ["50.000000000000000000", "30.000000000000000000"],
+  "prices": ["0.622459331201854587", "0.377540668798145413"],
+  "options": [
+    {
+      "outcomeIndex": 0,
+      "label": "Yes",
+      "instantPrice": "0.622459331201854587",
+      "buyQuote": {
+        "quantity": "1",
+        "instantPrice": "0.622459331201854587",
+        "tradeCost": "0.622459331201854587"
+      },
+      "sellQuote": {
+        "quantity": "1",
+        "instantPrice": "0.622459331201854587",
+        "tradeCost": "0.622459331201854587"
+      }
+    },
+    { "outcomeIndex": 1, "label": "No", ... }
+  ]
+}
+```
+
+- **`prices`**: Instantaneous (marginal) LMSR price per outcome; values in [0,1] and sum to 1.
+- **`quantities`**: Outcome quantities `q` used for LMSR (net position per outcome).
+- **`options`**: Per-outcome buy/sell quotes at the requested `quantity` (instantPrice and tradeCost).
+
+### Response (404)
+
+Market not found.
+
+---
+
+## 2c. Get single buy/sell quote (LMSR)
+
+**`GET /api/markets/:id/prices/quote`**
+
+Returns a single quote for buying or selling a given quantity of one option. Public.
+
+### Query parameters
+
+| Parameter     | Type   | Required | Description |
+|---------------|--------|----------|-------------|
+| `outcomeIndex`| number | Yes      | Option index (e.g. 0 = Yes, 1 = No). |
+| `side`        | string | Yes      | `BUY` or `SELL`. |
+| `quantity`    | string | Yes      | Size to quote (e.g. `"10"`, `"0.5"`). |
+
+### Example
+
+```http
+GET /api/markets/550e8400-e29b-41d4-a716-446655440000/prices/quote?outcomeIndex=0&side=BUY&quantity=10
+```
+
+### Response (200)
+
+```json
+{
+  "marketId": "uuid",
+  "outcomeIndex": 0,
+  "side": "BUY",
+  "quantity": "10",
+  "instantPrice": "0.622459331201854587",
+  "tradeCost": "6.224593312018545870"
+}
+```
+
+- **`tradeCost`**: Total cost (user pays this for BUY; receives this for SELL). Positive for BUY.
+
+### Response (404)
+
+Market not found or quote unavailable (e.g. sell quantity exceeds available position for that outcome).
+
+---
+
 ## 3. Get market by condition id
 
 **`GET /api/markets/condition/:conditionId`**

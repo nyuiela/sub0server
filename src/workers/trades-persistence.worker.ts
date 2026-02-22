@@ -5,10 +5,14 @@
  * After persisting, increments Market.volume and publishes MARKET_UPDATES.
  */
 
+import dotenv from "dotenv";
+dotenv.config();
+
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Worker, type Job } from "bullmq";
 import { Decimal } from "decimal.js";
-import { config } from "../config/index.js";
-import { REDIS_CHANNELS } from "../config/index.js";
+import { config, REDIS_CHANNELS } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { getRedisPublisher } from "../lib/redis.js";
 import type { PrismaClient } from "@prisma/client";
@@ -35,6 +39,38 @@ async function resolveAddress(
 }
 
 /**
+ * For each maker order referenced in trades, set status to PARTIALLY_FILLED or FILLED
+ * based on total filled quantity in this job vs order amount.
+ */
+async function updateMakerOrderStatuses(
+  prisma: PrismaClient,
+  trades: ExecutedTrade[]
+): Promise<void> {
+  const filledByMakerId = new Map<string, Decimal>();
+  for (const t of trades) {
+    const qty = new Decimal(t.quantity);
+    const prev = filledByMakerId.get(t.makerOrderId) ?? new Decimal(0);
+    filledByMakerId.set(t.makerOrderId, prev.plus(qty));
+  }
+  for (const [makerOrderId, filledQty] of filledByMakerId) {
+    const order = await prisma.order.findUnique({
+      where: { id: makerOrderId },
+      select: { id: true, amount: true, status: true },
+    });
+    if (!order) continue;
+    const orderAmount = new Decimal(order.amount.toString());
+    const status =
+      filledQty.gte(orderAmount) ? "FILLED" : "PARTIALLY_FILLED";
+    if (order.status !== "FILLED") {
+      await prisma.order.update({
+        where: { id: makerOrderId },
+        data: { status, updatedAt: new Date() },
+      });
+    }
+  }
+}
+
+/**
  * Apply each trade to buyer and seller positions for that outcome.
  * Buyer (BID taker or ASK maker): LONG position +quantity.
  * Seller (ASK maker or BID taker): LONG -quantity or SHORT +quantity.
@@ -48,7 +84,10 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
     const sellerUserId = t.side === "ASK" ? t.userId : t.makerUserId;
     const sellerAgentId = t.side === "ASK" ? t.agentId : t.makerAgentId;
     const buyerAddress = await resolveAddress(prisma, buyerUserId, buyerAgentId);
-    const sellerAddress = await resolveAddress(prisma, sellerUserId, sellerAgentId);
+    const sellerAddress =
+      sellerUserId ?? sellerAgentId
+        ? await resolveAddress(prisma, sellerUserId, sellerAgentId)
+        : (t.makerOrderId?.startsWith("platform-") ? config.platformLiquidityAddress ?? null : null);
 
     const market = await prisma.market.findUnique({
       where: { id: t.marketId },
@@ -195,6 +234,15 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
   if (trades.length === 0 && !order) return;
 
   const prisma = getPrismaClient();
+  const marketId = order?.marketId ?? trades[0]?.marketId;
+  if (marketId) {
+    const market = await prisma.market.findUnique({ where: { id: marketId }, select: { id: true } });
+    if (!market) {
+      console.warn(`Trades job ${job.id}: market ${marketId} not found (deleted?), skipping persist`);
+      return;
+    }
+  }
+
   const now = new Date();
 
   if (order) {
@@ -205,6 +253,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
         marketId: order.marketId,
         outcomeIndex: order.outcomeIndex,
         side: order.side,
+        type: order.type,
         amount: order.quantity,
         price: order.price,
         status: order.status,
@@ -212,6 +261,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
         updatedAt: now,
       },
       update: {
+        type: order.type,
         amount: order.quantity,
         status: order.status,
         updatedAt: now,
@@ -236,6 +286,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
     skipDuplicates: true,
   });
 
+  await updateMakerOrderStatuses(prisma, trades);
   await applyTradesToPositions(prisma, trades);
 
   const volumeDeltas = volumeDeltaByMarket(trades);
@@ -267,7 +318,11 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+/**
+ * Create and start the trades persistence worker. Use from server (in-process) or run this file standalone.
+ * Returns the Worker instance so the caller can close it on shutdown.
+ */
+export async function startTradesPersistenceWorker(): Promise<Worker<TradesJobPayload>> {
   const worker = new Worker<TradesJobPayload>(
     TRADES_QUEUE_NAME,
     async (job) => persistTrades(job),
@@ -283,6 +338,11 @@ async function main(): Promise<void> {
   });
   worker.on("failed", (job, err) => console.error(`Trades job ${job?.id} failed:`, err));
 
+  return worker;
+}
+
+async function main(): Promise<void> {
+  const worker = await startTradesPersistenceWorker();
   const shutdown = async () => {
     await worker.close();
     process.exit(0);
@@ -291,7 +351,11 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const __filename = fileURLToPath(import.meta.url);
+const entryPath = resolve(process.argv[1] ?? "");
+if (entryPath === __filename) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

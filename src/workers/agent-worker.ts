@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { Worker, type Job } from "bullmq";
 import { config } from "../config/index.js";
 

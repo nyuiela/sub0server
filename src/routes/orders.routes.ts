@@ -58,6 +58,8 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       const result = await submitOrder(input);
       return reply.code(201).send({
         orderId: input.id,
+        type: input.type,
+        status: result.order.status,
         trades: result.trades,
         snapshot: result.snapshot,
       });

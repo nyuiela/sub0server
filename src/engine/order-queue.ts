@@ -12,11 +12,18 @@
  *   each market's queue is independent. Only same-market orders are serialized.
  */
 
+import { Decimal } from "decimal.js";
 import { getOrderBook } from "./matching-engine.js";
 import { getRedisPublisher } from "../lib/redis.js";
 import { REDIS_CHANNELS } from "../config/index.js";
+import { fillMarketFromPlatform } from "../services/platform-fill.service.js";
 import { enqueueOrderAndTradesForPersistence } from "../workers/trades-queue.js";
-import type { OrderInput, ExecutedTrade, OrderBookSnapshot } from "../types/order-book.js";
+import type {
+  OrderInput,
+  ExecutedTrade,
+  EngineOrder,
+  OrderBookSnapshot,
+} from "../types/order-book.js";
 
 /** Payload published to Redis for ORDER_BOOK_UPDATE. */
 export interface OrderBookUpdateMessage {
@@ -33,7 +40,11 @@ export interface TradeExecutedMessage {
 /** Queued order plus resolve/reject for the submitter. */
 interface QueuedOrder {
   input: OrderInput;
-  resolve: (result: { trades: ExecutedTrade[]; snapshot: OrderBookSnapshot }) => void;
+  resolve: (result: {
+    order: EngineOrder;
+    trades: ExecutedTrade[];
+    snapshot: OrderBookSnapshot;
+  }) => void;
   reject: (err: Error) => void;
 }
 
@@ -64,11 +75,35 @@ function getOrCreateQueue(marketId: string, outcomeIndex: number): MarketQueue {
  * Called only from drainQueue for this (market, outcome) (single-threaded per book).
  */
 async function processOne(marketId: string, outcomeIndex: number, input: OrderInput): Promise<{
+  order: EngineOrder;
   trades: ExecutedTrade[];
   snapshot: OrderBookSnapshot;
 }> {
   const book = getOrderBook(marketId, outcomeIndex);
-  const result = book.processOrder(input);
+  let result = book.processOrder(input);
+
+  if (
+    result.order.type === "MARKET" &&
+    new Decimal(result.order.remainingQty).gt(0)
+  ) {
+    const bestAsk =
+      result.orderBookSnapshot.asks[0]?.price ?? undefined;
+    const platformResult = await fillMarketFromPlatform(
+      marketId,
+      outcomeIndex,
+      result.order,
+      result.trades,
+      bestAsk
+    );
+    if (platformResult.additionalTrades.length > 0) {
+      result = {
+        order: platformResult.updatedOrder,
+        trades: [...result.trades, ...platformResult.additionalTrades],
+        orderBookSnapshot: result.orderBookSnapshot,
+      };
+    }
+  }
+
   const redis = await getRedisPublisher();
 
   await redis.publish(
@@ -96,7 +131,11 @@ async function processOne(marketId: string, outcomeIndex: number, input: OrderIn
     console.error("Enqueue order and trades for persistence failed:", err)
   );
 
-  return { trades: result.trades, snapshot: result.orderBookSnapshot };
+  return {
+    order: result.order,
+    trades: result.trades,
+    snapshot: result.orderBookSnapshot,
+  };
 }
 
 /**
@@ -111,8 +150,8 @@ async function drainQueue(marketId: string, outcomeIndex: number): Promise<void>
   const next = q.pending.shift()!;
 
   try {
-    const { trades, snapshot } = await processOne(marketId, outcomeIndex, next.input);
-    next.resolve({ trades, snapshot });
+    const { order, trades, snapshot } = await processOne(marketId, outcomeIndex, next.input);
+    next.resolve({ order, trades, snapshot });
   } catch (err) {
     next.reject(err instanceof Error ? err : new Error(String(err)));
   } finally {
@@ -128,6 +167,7 @@ async function drainQueue(marketId: string, outcomeIndex: number): Promise<void>
  * processed in FIFO order. Returns a promise that resolves when this order has been processed.
  */
 export function submitOrder(input: OrderInput): Promise<{
+  order: EngineOrder;
   trades: ExecutedTrade[];
   snapshot: OrderBookSnapshot;
 }> {

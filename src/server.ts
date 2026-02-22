@@ -20,9 +20,13 @@ import { registerToolRoutes } from "./routes/tools.routes.js";
 import { registerOrderRoutes } from "./routes/orders.routes.js";
 import { registerActivityRoutes } from "./routes/activities.routes.js";
 import { registerRegisterRoutes } from "./routes/register.routes.js";
+import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
+import type { Worker } from "bullmq";
+import type { TradesJobPayload } from "./workers/trades-queue.js";
 import type { WebSocket } from "ws";
 
 const fastify = Fastify({ logger: true });
+let tradesWorker: Worker<TradesJobPayload> | null = null;
 
 await fastify.register(fastifyCookie, { parseOptions: {} });
 await fastify.register(fastifyCors, {
@@ -78,7 +82,8 @@ const start = async () => {
     const manager = getSocketManager();
     await manager.start();
     await fastify.listen({ port: config.port, host: "0.0.0.0" });
-    fastify.log.info("Server and WebSocket manager started");
+    tradesWorker = await startTradesPersistenceWorker();
+    fastify.log.info("Server, WebSocket manager and trades persistence worker started");
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -86,6 +91,10 @@ const start = async () => {
 };
 
 const shutdown = async () => {
+  if (tradesWorker) {
+    await tradesWorker.close();
+    tradesWorker = null;
+  }
   await fastify.close();
   await disconnectPrisma();
   await closeRedis();
