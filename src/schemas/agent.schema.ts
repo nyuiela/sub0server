@@ -28,6 +28,14 @@ export const agentQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
+/** Public list: no auth; only status, limit, offset (no ownerId). */
+export const agentPublicListSchema = z.object({
+  status: agentStatusEnum.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
 export type AgentCreateInput = z.infer<typeof agentCreateSchema>;
 export type AgentUpdateInput = z.infer<typeof agentUpdateSchema>;
 export type AgentQueryInput = z.infer<typeof agentQuerySchema>;
+export type AgentPublicListInput = z.infer<typeof agentPublicListSchema>;

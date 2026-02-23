@@ -84,13 +84,20 @@ model Agent {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
+  currentExposure     Decimal   @default(0) @db.Decimal(28, 8)
+  maxDrawdown         Decimal   @default(0) @db.Decimal(28, 8)
+  winRate             Float     @default(0)
+  totalLlmTokens      Int       @default(0)
+  totalLlmCost        Decimal   @default(0) @db.Decimal(28, 8)
+
   owner       User             @relation("UserToAgent", fields: [ownerId], references: [id], onDelete: Cascade)
   template    Template?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
   trades      Trade[]
   positions   Position[]
   aiLogs      AiLog[]
   activities  Activity[]
-  track       AgentTrack?
+  tracks      AgentTrack[]
+  reasoningLogs AgentReasoning[]
 
   @@index([ownerId])
   @@index([status])
@@ -109,15 +116,20 @@ model AgentStrategy {
 
 model AgentTrack {
   id        String   @id @default(uuid())
-  agentId   String   @unique
+  agentId   String
   date      DateTime @db.Date
   volume    Decimal  @default(0) @db.Decimal(28, 8)
   trades    Int      @default(0)
   pnl       Decimal  @default(0) @db.Decimal(28, 8)
+  exposure  Decimal  @default(0) @db.Decimal(28, 8)
+  drawdown  Decimal  @default(0) @db.Decimal(28, 8)
+  llmTokensUsed Int  @default(0)
+  llmCost   Decimal  @default(0) @db.Decimal(28, 8)
   createdAt DateTime @default(now())
 
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
+  @@unique([agentId, date])
   @@index([agentId])
   @@index([date])
 }
@@ -161,6 +173,7 @@ model Market {
   orders    Order[]
   news      News[]
   aiLogs    AiLog[]
+  agentReasons AgentReasoning[]
 
   @@index([creatorAddress])
   @@index([status])
@@ -280,6 +293,31 @@ model AiLog {
 
   @@index([agentId])
   @@index([marketId])
+}
+
+model AgentReasoning {
+  id                String   @id @default(uuid())
+  agentId           String
+  marketId          String?
+  model             String
+  systemPrompt      String?  @db.Text
+  userContext       String   @db.Text
+  reasoning         String?  @db.Text
+  response          String   @db.Text
+  promptTokens      Int      @default(0)
+  completionTokens  Int      @default(0)
+  totalTokens       Int      @default(0)
+  estimatedCost     Decimal  @default(0) @db.Decimal(28, 8)
+  riskScore         Float?
+  actionTaken       String?
+  createdAt         DateTime @default(now())
+
+  agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market Market? @relation(fields: [marketId], references: [id], onDelete: SetNull)
+
+  @@index([agentId])
+  @@index([marketId])
+  @@index([createdAt])
 }
 
 model AiRequest {

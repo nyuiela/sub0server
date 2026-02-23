@@ -7,12 +7,14 @@ import {
   agentCreateSchema,
   agentUpdateSchema,
   agentQuerySchema,
+  agentPublicListSchema,
   type AgentCreateInput,
   type AgentUpdateInput,
   type AgentQueryInput,
+  type AgentPublicListInput,
 } from "../schemas/agent.schema.js";
 
-/** Serialize agent for API display; omits encryptedPrivateKey. */
+/** Serialize agent for API display; omits encryptedPrivateKey; Decimal fields as string. */
 function serializeAgent(agent: {
   id: string;
   ownerId: string;
@@ -28,6 +30,11 @@ function serializeAgent(agent: {
   templateId: string | null;
   createdAt: Date;
   updatedAt: Date;
+  currentExposure?: { toString(): string };
+  maxDrawdown?: { toString(): string };
+  winRate?: number;
+  totalLlmTokens?: number;
+  totalLlmCost?: { toString(): string };
 }) {
   const { encryptedPrivateKey: _skip, ...rest } = agent as typeof agent & { encryptedPrivateKey?: string };
   return {
@@ -35,18 +42,30 @@ function serializeAgent(agent: {
     balance: agent.balance.toString(),
     tradedAmount: agent.tradedAmount.toString(),
     pnl: agent.pnl.toString(),
+    currentExposure: agent.currentExposure?.toString() ?? "0",
+    maxDrawdown: agent.maxDrawdown?.toString() ?? "0",
+    totalLlmCost: agent.totalLlmCost?.toString() ?? "0",
   };
 }
 
 export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/agents", async (req: FastifyRequest<{ Querystring: AgentQueryInput }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
     const parsed = agentQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
     const { ownerId, status, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
-    const where = { ...(ownerId ? { ownerId } : {}), ...(status ? { status } : {}) };
+    const effectiveOwnerId =
+      requireApiKey(req) ? ownerId : requireUser(req)?.userId ?? null;
+    if (!effectiveOwnerId && !requireApiKey(req)) {
+      return reply.code(403).send({ error: "Forbidden: must be owner or use API key to list agents" });
+    }
+    const where = {
+      ...(effectiveOwnerId ? { ownerId: effectiveOwnerId } : {}),
+      ...(status ? { status } : {}),
+    };
     const [agents, total] = await Promise.all([
       prisma.agent.findMany({
         where,
@@ -74,7 +93,53 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  /** Public list: no auth; basic fields only (name, status, volume, trades, pnl, time). */
+  app.get("/api/agents/public", async (req: FastifyRequest<{ Querystring: AgentPublicListInput }>, reply: FastifyReply) => {
+    const parsed = agentPublicListSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+    }
+    const { status, limit, offset } = parsed.data;
+    const prisma = getPrismaClient();
+    const where = status ? { status } : {};
+    const [agents, total] = await Promise.all([
+      prisma.agent.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          tradedAmount: true,
+          totalTrades: true,
+          pnl: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.agent.count({ where }),
+    ]);
+    return reply.send({
+      data: agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        status: a.status,
+        volume: a.tradedAmount.toString(),
+        trades: a.totalTrades,
+        pnl: a.pnl.toString(),
+        createdAt: a.createdAt.toISOString(),
+        updatedAt: a.updatedAt.toISOString(),
+      })),
+      total,
+      limit,
+      offset,
+    });
+  });
+
   app.get("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const prisma = getPrismaClient();
     const agent = await prisma.agent.findUnique({
       where: { id: req.params.id },
@@ -90,6 +155,77 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       owner: agent.owner,
       strategy: agent.strategy,
       template: agent.template,
+    });
+  });
+
+  app.get("/api/agents/:id/tracks", async (req: FastifyRequest<{ Params: { id: string }; Querystring: { limit?: string; from?: string; to?: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+    const limit = Math.min(Math.max(1, Number(req.query.limit) || 90), 365);
+    const from = req.query.from ? new Date(req.query.from) : undefined;
+    const to = req.query.to ? new Date(req.query.to) : undefined;
+    const prisma = getPrismaClient();
+    const where: { agentId: string; date?: { gte?: Date; lte?: Date } } = { agentId: req.params.id };
+    if (from ?? to) {
+      where.date = {};
+      if (from) where.date.gte = from;
+      if (to) where.date.lte = to;
+    }
+    const tracks = await prisma.agentTrack.findMany({
+      where,
+      orderBy: { date: "asc" },
+      take: limit,
+    });
+    type TrackRow = typeof tracks[0] & {
+      exposure?: { toString(): string };
+      drawdown?: { toString(): string };
+      llmTokensUsed?: number;
+      llmCost?: { toString(): string };
+    };
+    return reply.send({
+      data: tracks.map((t) => {
+        const row = t as TrackRow;
+        return {
+          id: row.id,
+          agentId: row.agentId,
+          date: row.date.toISOString().slice(0, 10),
+          volume: row.volume.toString(),
+          trades: row.trades,
+          pnl: row.pnl.toString(),
+          exposure: row.exposure?.toString() ?? "0",
+          drawdown: row.drawdown?.toString() ?? "0",
+          llmTokensUsed: row.llmTokensUsed ?? 0,
+          llmCost: row.llmCost?.toString() ?? "0",
+          createdAt: row.createdAt.toISOString(),
+        };
+      }),
+    });
+  });
+
+  app.get("/api/agents/:id/reasoning", async (req: FastifyRequest<{ Params: { id: string }; Querystring: { limit?: string; offset?: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+    const limit = Math.min(Math.max(1, Number(req.query.limit) || 20), 100);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const prisma = getPrismaClient();
+    const repo = (prisma as unknown as { agentReasoning: { findMany: typeof prisma.agentTrack.findMany; count: typeof prisma.agentTrack.count } }).agentReasoning;
+    const [items, total] = await Promise.all([
+      repo.findMany({
+        where: { agentId: req.params.id },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      repo.count({ where: { agentId: req.params.id } }),
+    ]);
+    type ReasonRow = { estimatedCost?: { toString(): string }; createdAt: Date; [k: string]: unknown };
+    return reply.send({
+      data: items.map((r: ReasonRow) => ({
+        ...r,
+        estimatedCost: r.estimatedCost?.toString() ?? "0",
+        createdAt: r.createdAt.toISOString(),
+      })),
+      total,
+      limit,
+      offset,
     });
   });
 
