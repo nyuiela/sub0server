@@ -12,6 +12,7 @@ import {
   type AgentQueryInput,
 } from "../schemas/agent.schema.js";
 
+/** Serialize agent for API display; omits encryptedPrivateKey. */
 function serializeAgent(agent: {
   id: string;
   ownerId: string;
@@ -28,8 +29,9 @@ function serializeAgent(agent: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const { encryptedPrivateKey: _skip, ...rest } = agent as typeof agent & { encryptedPrivateKey?: string };
   return {
-    ...agent,
+    ...rest,
     balance: agent.balance.toString(),
     tradedAmount: agent.tradedAmount.toString(),
     pnl: agent.pnl.toString(),
@@ -51,12 +53,21 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: { owner: { select: { id: true, address: true } }, strategy: true },
+        include: {
+          owner: { select: { id: true, address: true } },
+          strategy: true,
+          template: { select: { id: true, name: true } },
+        },
       }),
       prisma.agent.count({ where }),
     ]);
     return reply.send({
-      data: agents.map((a) => ({ ...serializeAgent(a), owner: a.owner, strategy: a.strategy })),
+      data: agents.map((a) => ({
+        ...serializeAgent(a),
+        owner: a.owner,
+        strategy: a.strategy,
+        template: a.template,
+      })),
       total,
       limit,
       offset,
@@ -67,7 +78,11 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     const prisma = getPrismaClient();
     const agent = await prisma.agent.findUnique({
       where: { id: req.params.id },
-      include: { owner: true, strategy: true, template: true },
+      include: {
+        owner: { select: { id: true, address: true } },
+        strategy: true,
+        template: { select: { id: true, name: true } },
+      },
     });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
     return reply.send({

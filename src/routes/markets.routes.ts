@@ -24,9 +24,12 @@ import { getMarketPrices, getMarketQuote } from "../services/lmsr-prices.service
 import {
   marketPricesQuerySchema,
   marketQuoteQuerySchema,
+  candlesQuerySchema,
   type MarketPricesQueryInput,
   type MarketQuoteQueryInput,
+  type CandlesQueryInput,
 } from "../schemas/price.schema.js";
+import { getMarketCandles } from "../services/candles.service.js";
 
 function serializeMarket(market: {
   id: string;
@@ -224,6 +227,35 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       const prices = await getMarketPrices(req.params.id, parsed.data.quantity);
       if (!prices) return reply.code(404).send({ error: "Market not found" });
       return reply.send(prices);
+    }
+  );
+
+  app.get(
+    "/api/markets/:id/candles",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: CandlesQueryInput;
+      }>,
+      reply: FastifyReply
+    ) => {
+      const parsed = candlesQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
+      }
+      const prisma = getPrismaClient();
+      const market = await prisma.market.findUnique({
+        where: { id: req.params.id },
+        select: { id: true },
+      });
+      if (!market) return reply.code(404).send({ error: "Market not found" });
+      const candles = await getMarketCandles(req.params.id, parsed.data.resolution, {
+        outcomeIndex: parsed.data.outcomeIndex,
+        limit: parsed.data.limit,
+        from: parsed.data.from != null ? new Date(parsed.data.from) : undefined,
+        to: parsed.data.to != null ? new Date(parsed.data.to) : undefined,
+      });
+      return reply.send({ marketId: req.params.id, candles });
     }
   );
 

@@ -67,6 +67,20 @@ function makeConfig() {
     get platformInitialLiquidityPerOutcome(): number {
       return Number(optionalEnv("PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME", "10000"));
     },
+    /** News ingestion: poll interval in ms (default 10s). */
+    get newsPollIntervalMs(): number {
+      return Number(optionalEnv("NEWS_POLL_INTERVAL_MS", "10000"));
+    },
+    /** CryptoPanic API key (optional). When set, fetches from CryptoPanic in addition to RSS. */
+    get cryptopanicApiKey(): string | undefined {
+      return process.env.CRYPTOPANIC_API_KEY ?? undefined;
+    },
+    /** Comma-separated tickers to filter ingested items (e.g. BTC,ETH). Empty = no filter. */
+    get newsFilterCurrencies(): string[] {
+      const s = process.env.NEWS_FILTER_CURRENCIES?.trim();
+      if (!s) return [];
+      return s.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
+    },
   };
 }
 

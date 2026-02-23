@@ -18,23 +18,25 @@
     "feed": "tsx src/services/price-feed.service.ts",
     "live-test": "tsx src/scripts/live-test.ts",
     "ws-test": "tsx src/scripts/ws-test.ts",
-    "stake-verify": "tsx src/scripts/stake-verify-live.ts"
+    "stake-verify": "tsx src/scripts/stake-verify-live.ts",
+    "news-ingest": "tsx src/workers/news-ingest.worker.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.2.0",
     "@fastify/websocket": "^11.0.0",
     "@prisma/client": "^6.0.0",
     "bullmq": "^5.0.0",
     "decimal.js": "^10.6.0",
+    "dotenv": "^16.4.5",
     "fastify": "^5.0.0",
     "ioredis": "^5.4.0",
     "jsonwebtoken": "^9.0.2",
     "prisma": "^6.0.0",
+    "rss-parser": "^3.13.0",
     "thirdweb": "^5.118.2",
     "viem": "^2.46.2",
     "ws": "^8.18.0",

@@ -20,6 +20,7 @@ import { registerToolRoutes } from "./routes/tools.routes.js";
 import { registerOrderRoutes } from "./routes/orders.routes.js";
 import { registerActivityRoutes } from "./routes/activities.routes.js";
 import { registerRegisterRoutes } from "./routes/register.routes.js";
+import { registerFeedRoutes } from "./routes/feed.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
 import type { Worker } from "bullmq";
 import type { TradesJobPayload } from "./workers/trades-queue.js";
@@ -76,6 +77,7 @@ await registerToolRoutes(fastify);
 await registerOrderRoutes(fastify);
 await registerActivityRoutes(fastify);
 await registerRegisterRoutes(fastify);
+await registerFeedRoutes(fastify);
 
 const start = async () => {
   try {

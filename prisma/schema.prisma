@@ -249,6 +249,24 @@ model News {
   @@index([marketId])
 }
 
+/// Raw ingested items from RSS and CryptoPanic. Deduped by source + externalId.
+model FeedItem {
+  id          String    @id @default(uuid())
+  source      String    // RSS_COINDESK | RSS_COINTELEGRAPH | CRYPTOPANIC
+  externalId  String
+  title       String
+  body        String?
+  sourceUrl   String?
+  imageUrl    String?
+  publishedAt DateTime
+  metadata    Json?     // e.g. { currencies: ["BTC"], kind: "news" }
+  createdAt   DateTime @default(now())
+
+  @@unique([source, externalId])
+  @@index([source])
+  @@index([publishedAt])
+}
+
 model AiLog {
   id        String   @id @default(uuid())
   agentId   String
