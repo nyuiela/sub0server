@@ -16,12 +16,15 @@ const agentTemplateSchema = z.object({
   modelSettings: z.record(z.unknown()).optional(),
 });
 
+/** Letters, numbers, underscore, hyphen only. Hyphen at start of class so it is literal. */
+const USERNAME_REGEX = /^[-a-zA-Z0-9_]+$/;
+
 export const usernameCheckSchema = z.object({
-  username: z.string().min(2).max(32).regex(/^[a-zA-Z0-9_-]+$/),
+  username: z.string().trim().min(2).max(32).regex(USERNAME_REGEX),
 });
 
 export const registerBodySchema = z.object({
-  username: z.string().min(2).max(32).regex(/^[a-zA-Z0-9_-]+$/),
+  username: z.string().trim().min(2).max(32).regex(USERNAME_REGEX),
   authMethod: authMethodSchema,
   agent: z.union([
     z.object({ create: agentCreateSchema }),

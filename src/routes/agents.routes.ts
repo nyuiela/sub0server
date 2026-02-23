@@ -57,13 +57,16 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     }
     const { ownerId, status, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
-    const effectiveOwnerId =
-      requireApiKey(req) ? ownerId : requireUser(req)?.userId ?? null;
-    if (!effectiveOwnerId && !requireApiKey(req)) {
-      return reply.code(403).send({ error: "Forbidden: must be owner or use API key to list agents" });
+    const isApiKey = requireApiKey(req);
+    const effectiveOwnerId = isApiKey ? ownerId ?? null : requireUser(req)?.userId ?? null;
+    if (effectiveOwnerId == null || effectiveOwnerId === "") {
+      if (isApiKey) {
+        return reply.code(403).send({ error: "Forbidden: must be owner or use API key to list agents" });
+      }
+      return reply.send({ data: [], total: 0, limit, offset });
     }
     const where = {
-      ...(effectiveOwnerId ? { ownerId: effectiveOwnerId } : {}),
+      ownerId: effectiveOwnerId,
       ...(status ? { status } : {}),
     };
     const [agents, total] = await Promise.all([

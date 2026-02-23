@@ -54,10 +54,13 @@ function makeConfig() {
     get agentEncryptionSecret(): string {
       return process.env.AGENT_ENCRYPTION_SECRET ?? requiredEnv("JWT_SECRET");
     },
-    get corsOrigin(): string | true {
-      const o = process.env.CORS_ORIGIN;
+    /** Comma-separated origins (e.g. "http://localhost:3000,http://localhost:3001"). "*" or "true" = allow all. */
+    get corsOrigin(): string | string[] | true {
+      const o = process.env.CORS_ORIGIN?.trim();
       if (o === "true" || o === "*") return true;
-      return o ?? "http://localhost:3000";
+      const raw = o ?? "http://localhost:3000";
+      const list = raw.split(",").map((s) => s.trim()).filter(Boolean);
+      return list.length > 1 ? list : list[0] ?? raw;
     },
     /** Platform liquidity: address that holds positions used to fill MARKET orders. If unset, no platform fill. */
     get platformLiquidityAddress(): string | undefined {
