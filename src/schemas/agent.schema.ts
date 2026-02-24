@@ -12,9 +12,11 @@ export const agentCreateSchema = z.object({
   templateId: z.string().uuid().optional().nullable(),
 });
 
+const PERSONA_MAX_LEN = 50_000;
+
 export const agentUpdateSchema = z.object({
-  name: z.string().min(1).optional(),
-  persona: z.string().min(1).optional(),
+  name: z.string().min(1).max(120).optional(),
+  persona: z.string().min(1).max(PERSONA_MAX_LEN).optional(),
   encryptedPrivateKey: z.string().min(1).optional(),
   modelSettings: z.record(z.unknown()).optional(),
   status: agentStatusEnum.optional(),

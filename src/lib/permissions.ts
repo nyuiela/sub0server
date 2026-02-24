@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "./prisma.js";
 import { requireUser, requireApiKey } from "./auth.js";
+import type { User } from "@prisma/client";
 
 /**
  * Require any auth (user or API key). Returns 401 if unauthenticated.
@@ -33,6 +34,38 @@ export function requireUserOrApiKey(req: FastifyRequest, reply: FastifyReply): b
     return false;
   }
   return true;
+}
+
+/**
+ * Require JWT user (no API key). Resolve current user from DB by userId or address.
+ * Returns the User record or sends 401/403 and returns null.
+ */
+export async function requireCurrentUser(
+  req: FastifyRequest,
+  reply: FastifyReply
+): Promise<User | null> {
+  if (!requireAuth(req)) {
+    reply.code(401).send({ error: "Authentication required" });
+    return null;
+  }
+  if (requireApiKey(req)) {
+    reply.code(403).send({ error: "Settings endpoints require user session" });
+    return null;
+  }
+  const authUser = requireUser(req);
+  if (!authUser?.address) {
+    reply.code(403).send({ error: "User not found" });
+    return null;
+  }
+  const prisma = getPrismaClient();
+  const user = await prisma.user.findUnique({
+    where: authUser.userId ? { id: authUser.userId } : { address: authUser.address },
+  });
+  if (!user) {
+    reply.code(403).send({ error: "User not found or not registered" });
+    return null;
+  }
+  return user;
 }
 
 /**

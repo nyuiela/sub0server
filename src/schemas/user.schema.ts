@@ -5,8 +5,21 @@ export const userCreateSchema = z.object({
   email: z.string().email().optional().nullable(),
 });
 
+const USERNAME_MAX_LEN = 64;
+
 export const userUpdateSchema = z.object({
-  email: z.string().email().optional().nullable(),
+  username: z
+    .string()
+    .max(USERNAME_MAX_LEN)
+    .optional()
+    .nullable()
+    .transform((v) => (v === "" ? null : v)),
+  email: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v === "" || v == null ? null : v))
+    .refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), { message: "Invalid email" }),
 });
 
 export const userQuerySchema = z.object({

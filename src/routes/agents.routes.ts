@@ -14,6 +14,48 @@ import {
   type AgentPublicListInput,
 } from "../schemas/agent.schema.js";
 
+const OPENCLAW_KEYS = [
+  "soul",
+  "persona",
+  "skill",
+  "methodology",
+  "failed_tests",
+  "context",
+  "constraints",
+] as const;
+
+type OpenClawRow = {
+  soul: string | null;
+  persona: string | null;
+  skill: string | null;
+  methodology: string | null;
+  failed_tests: string | null;
+  context: string | null;
+  constraints: string | null;
+};
+
+function openclawFromRow(row: OpenClawRow | null): Record<string, string> | undefined {
+  if (!row) return undefined;
+  const out: Record<string, string> = {};
+  for (const k of OPENCLAW_KEYS) {
+    const v = row[k];
+    if (v != null && v !== "") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function modelSettingsWithOpenclaw(
+  modelSettings: unknown,
+  openclaw: OpenClawRow | null
+): unknown {
+  const base = typeof modelSettings === "object" && modelSettings !== null
+    ? { ...(modelSettings as Record<string, unknown>) }
+    : {};
+  const merged = openclawFromRow(openclaw);
+  if (merged) (base as Record<string, unknown>).openclaw = merged;
+  return base;
+}
+
 /** Serialize agent for API display; omits encryptedPrivateKey; Decimal fields as string. */
 function serializeAgent(agent: {
   id: string;
@@ -150,11 +192,83 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         owner: { select: { id: true, address: true } },
         strategy: true,
         template: { select: { id: true, name: true } },
+        openclaw: true,
       },
     });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
+    const modelSettings = modelSettingsWithOpenclaw(agent.modelSettings, agent.openclaw);
+    const payload = {
+      ...serializeAgent(agent),
+      modelSettings,
+      owner: agent.owner,
+      strategy: agent.strategy,
+      template: agent.template,
+    };
+    return reply.send(payload);
+  });
+
+  app.patch("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+    const parsed = agentUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
+    }
+    const raw = parsed.data;
+    const data: Prisma.AgentUpdateInput = {};
+    if (raw.name !== undefined) data.name = raw.name;
+    if (raw.persona !== undefined) data.persona = raw.persona;
+    if (raw.encryptedPrivateKey !== undefined) data.encryptedPrivateKey = raw.encryptedPrivateKey;
+    if (raw.status !== undefined) data.status = raw.status;
+    if (raw.templateId !== undefined) {
+      data.template = raw.templateId === null
+        ? { disconnect: true }
+        : { connect: { id: raw.templateId } };
+    }
+    let modelSettingsForDb = raw.modelSettings as Record<string, unknown> | undefined;
+    const openclawPayload =
+      modelSettingsForDb && typeof modelSettingsForDb.openclaw === "object" && modelSettingsForDb.openclaw !== null
+        ? (modelSettingsForDb.openclaw as Record<string, unknown>)
+        : undefined;
+    if (openclawPayload !== undefined && modelSettingsForDb) {
+      const rest = { ...modelSettingsForDb };
+      delete rest.openclaw;
+      modelSettingsForDb = Object.keys(rest).length > 0 ? rest : undefined;
+    } else if (openclawPayload === undefined) {
+      modelSettingsForDb = raw.modelSettings as Record<string, unknown> | undefined;
+    }
+    if (modelSettingsForDb !== undefined) data.modelSettings = modelSettingsForDb as Prisma.InputJsonValue;
+    const prisma = getPrismaClient();
+    const agentId = req.params.id;
+    if (openclawPayload !== undefined) {
+      const openclawData: Record<string, string | null> = {};
+      for (const k of OPENCLAW_KEYS) {
+        const v = openclawPayload[k];
+        openclawData[k] =
+          typeof v === "string" ? v : v == null ? null : String(v);
+      }
+      await prisma.agentOpenClaw.upsert({
+        where: { agentId },
+        create: { agentId, ...openclawData },
+        update: openclawData,
+      });
+    }
+    const agent = await prisma.agent
+      .update({
+        where: { id: agentId },
+        data,
+        include: {
+          owner: { select: { id: true, address: true } },
+          strategy: true,
+          template: { select: { id: true, name: true } },
+          openclaw: true,
+        },
+      })
+      .catch(() => null);
+    if (!agent) return reply.code(404).send({ error: "Agent not found" });
+    const modelSettings = modelSettingsWithOpenclaw(agent.modelSettings, agent.openclaw);
     return reply.send({
       ...serializeAgent(agent),
+      modelSettings,
       owner: agent.owner,
       strategy: agent.strategy,
       template: agent.template,
@@ -259,36 +373,6 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       include: { owner: { select: { id: true, address: true } } },
     });
     return reply.code(201).send({ ...serializeAgent(agent), owner: agent.owner });
-  });
-
-  app.patch("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
-    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
-    const parsed = agentUpdateSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
-    }
-    const raw = parsed.data;
-    const data: Prisma.AgentUpdateInput = {};
-    if (raw.name !== undefined) data.name = raw.name;
-    if (raw.persona !== undefined) data.persona = raw.persona;
-    if (raw.encryptedPrivateKey !== undefined) data.encryptedPrivateKey = raw.encryptedPrivateKey;
-    if (raw.modelSettings !== undefined) data.modelSettings = raw.modelSettings as Prisma.InputJsonValue;
-    if (raw.status !== undefined) data.status = raw.status;
-    if (raw.templateId !== undefined) {
-      data.template = raw.templateId === null
-        ? { disconnect: true }
-        : { connect: { id: raw.templateId } };
-    }
-    const prisma = getPrismaClient();
-    const agent = await prisma.agent
-      .update({
-        where: { id: req.params.id },
-        data,
-        include: { owner: { select: { id: true, address: true } }, strategy: true },
-      })
-      .catch(() => null);
-    if (!agent) return reply.code(404).send({ error: "Agent not found" });
-    return reply.send({ ...serializeAgent(agent), owner: agent.owner, strategy: agent.strategy });
   });
 
   app.delete("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

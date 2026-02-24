@@ -62,15 +62,28 @@ model User {
   trades     Trade[]
   positions  Position[]
   aiRequests AiRequest[]
+  vault      UserVault?
 
   @@index([username])
+}
+
+/// User-level Prediction Vault USDC balance (one row per user).
+model UserVault {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  balance   Decimal  @default(0) @db.Decimal(28, 8)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Agent {
   id                  String    @id @default(uuid())
   ownerId             String
   name                String
-  persona             String
+  persona             String    @db.Text
   publicKey           String
   encryptedPrivateKey  String
   strategy            AgentStrategy?
@@ -92,6 +105,7 @@ model Agent {
 
   owner       User             @relation("UserToAgent", fields: [ownerId], references: [id], onDelete: Cascade)
   template    Template?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  openclaw    AgentOpenClaw?
   trades      Trade[]
   positions   Position[]
   aiLogs      AiLog[]
@@ -102,6 +116,24 @@ model Agent {
   @@index([ownerId])
   @@index([status])
   @@index([templateId])
+}
+
+/// OpenClaw long-form docs (soul, persona, skill, etc.) stored as Text for efficiency.
+model AgentOpenClaw {
+  id           String   @id @default(uuid())
+  agentId      String   @unique
+  soul         String?  @db.Text
+  persona      String?  @db.Text
+  skill        String?  @db.Text
+  methodology  String?  @db.Text
+  failed_tests String?  @db.Text
+  context      String?  @db.Text
+  constraints  String?  @db.Text
+  updatedAt    DateTime @updatedAt
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
 }
 
 model AgentStrategy {

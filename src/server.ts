@@ -21,6 +21,8 @@ import { registerOrderRoutes } from "./routes/orders.routes.js";
 import { registerActivityRoutes } from "./routes/activities.routes.js";
 import { registerRegisterRoutes } from "./routes/register.routes.js";
 import { registerFeedRoutes } from "./routes/feed.routes.js";
+import { registerSettingsRoutes } from "./routes/settings.routes.js";
+import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
 import type { Worker } from "bullmq";
 import type { TradesJobPayload } from "./workers/trades-queue.js";
@@ -33,6 +35,8 @@ await fastify.register(fastifyCookie, { parseOptions: {} });
 await fastify.register(fastifyCors, {
   origin: config.corsOrigin,
   credentials: true,
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "api-key"],
 });
 fastify.register(fastifyWebsocket, {
   options: { maxPayload: 65536 },
@@ -68,6 +72,7 @@ fastify.get("/health", async () => ({ status: "ok" }));
 
 fastify.decorate("prisma", getPrismaClient());
 await registerAgentEnqueueRoutes(fastify);
+await registerAuthRoutes(fastify);
 await registerUserRoutes(fastify);
 await registerAgentRoutes(fastify);
 await registerMarketRoutes(fastify);
@@ -78,6 +83,7 @@ await registerOrderRoutes(fastify);
 await registerActivityRoutes(fastify);
 await registerRegisterRoutes(fastify);
 await registerFeedRoutes(fastify);
+await registerSettingsRoutes(fastify);
 
 const start = async () => {
   try {
