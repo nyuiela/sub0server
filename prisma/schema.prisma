@@ -112,10 +112,26 @@ model Agent {
   activities  Activity[]
   tracks      AgentTrack[]
   reasoningLogs AgentReasoning[]
+  enqueuedMarkets AgentEnqueuedMarket[]
 
   @@index([ownerId])
   @@index([status])
   @@index([templateId])
+}
+
+/// Markets enqueued for an agent (add-to-agent on Markets page). Used to show "Added (N)" and persist across sessions.
+model AgentEnqueuedMarket {
+  id        String   @id @default(uuid())
+  agentId   String
+  marketId  String
+  createdAt DateTime @default(now())
+
+  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, marketId])
+  @@index([agentId])
+  @@index([marketId])
 }
 
 /// OpenClaw long-form docs (soul, persona, skill, etc.) stored as Text for efficiency.
@@ -206,6 +222,7 @@ model Market {
   news      News[]
   aiLogs    AiLog[]
   agentReasons AgentReasoning[]
+  agentEnqueuedMarkets AgentEnqueuedMarket[]
 
   @@index([creatorAddress])
   @@index([status])

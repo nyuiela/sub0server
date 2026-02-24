@@ -24,6 +24,25 @@ export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<
     if (!market) return reply.code(404).send({ error: "Market not found" });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
     const jobId = await enqueueAgentPrediction({ marketId, agentId });
+    await prisma.agentEnqueuedMarket.upsert({
+      where: { agentId_marketId: { agentId, marketId } },
+      create: { agentId, marketId },
+      update: {},
+    });
     return reply.send({ jobId });
+  });
+
+  app.delete<{ Body: EnqueueBody }>("/api/agent/enqueue", async (req: FastifyRequest<{ Body: EnqueueBody }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
+    const { marketId, agentId } = req.body ?? {};
+    if (!marketId || !agentId) {
+      return reply.code(400).send({ error: "marketId and agentId required" });
+    }
+    if (!(await requireAgentOwnerOrApiKeyById(req, reply, agentId))) return;
+    const prisma = getPrismaClient();
+    await prisma.agentEnqueuedMarket.deleteMany({
+      where: { agentId, marketId },
+    });
+    return reply.code(204).send();
   });
 }

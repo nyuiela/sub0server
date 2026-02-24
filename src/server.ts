@@ -54,6 +54,82 @@ fastify.addHook("preValidation", async (request) => {
   }
 });
 
+const WS_TEST_INTERVAL_MS = 5000;
+
+const WS_OPEN = 1;
+
+function sendWsTestMessage(socket: WebSocket, label: string): void {
+  try {
+    if (socket.readyState !== WS_OPEN) {
+      fastify.log.info({ readyState: socket.readyState }, "ws-test skip send (not open)");
+      return;
+    }
+    const payload = JSON.stringify({
+      type: "PING",
+      message: label,
+      timestamp: Date.now(),
+    });
+    socket.send(payload);
+    fastify.log.info({ label }, "ws-test sent");
+  } catch (err) {
+    fastify.log.warn({ err }, "ws-test send failed");
+  }
+}
+
+function getRawSocket(connection: unknown): WebSocket | null {
+  if (connection === null || typeof connection !== "object") return null;
+  const conn = connection as { socket?: WebSocket; send?: (data: unknown) => void };
+  if (typeof conn.send === "function") return connection as WebSocket;
+  if (conn.socket != null && typeof (conn.socket as WebSocket).send === "function") return conn.socket as WebSocket;
+  return null;
+}
+
+function debugConnection(connection: unknown): Record<string, unknown> {
+  if (connection === null || typeof connection !== "object") return { type: typeof connection };
+  const c = connection as Record<string, unknown>;
+  const keys = Object.keys(c).filter((k) => !k.startsWith("_"));
+  const out: Record<string, unknown> = { keys, constructor: (c as object).constructor?.name };
+  for (const k of ["send", "on", "socket", "raw"]) {
+    if (k in c) out[k] = typeof (c as Record<string, unknown>)[k];
+  }
+  return out;
+}
+
+fastify.get("/ws-test", { websocket: true }, (connection: unknown, second: unknown) => {
+  let socket = getRawSocket(connection);
+  if (socket === null && second !== null && typeof second === "object") {
+    socket = getRawSocket(second);
+  }
+  if (socket === null) {
+    fastify.log.warn(
+      { connection: debugConnection(connection), second: debugConnection(second) },
+      "ws-test: could not resolve WebSocket"
+    );
+    return;
+  }
+  const ws = socket;
+  fastify.log.info({ readyState: ws.readyState }, "ws-test client connected");
+  const sendActive = () => sendWsTestMessage(ws, "ACTIVE");
+  let interval: ReturnType<typeof setInterval> | null = null;
+  ws.on("close", () => {
+    if (interval) clearInterval(interval);
+    fastify.log.info("ws-test client disconnected");
+  });
+  ws.on("error", (err: Error) => {
+    if (interval) clearInterval(interval);
+    fastify.log.warn({ err }, "ws-test client error");
+  });
+  function startSending() {
+    sendActive();
+    interval = setInterval(sendActive, WS_TEST_INTERVAL_MS);
+  }
+  if (ws.readyState === WS_OPEN) {
+    startSending();
+  } else {
+    ws.once("open", startSending);
+  }
+});
+
 fastify.get("/ws", { websocket: true }, (connection, req) => {
   const conn = connection as unknown as { socket?: WebSocket } & WebSocket;
   const rawSocket =

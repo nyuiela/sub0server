@@ -121,6 +121,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
           owner: { select: { id: true, address: true } },
           strategy: true,
           template: { select: { id: true, name: true } },
+          enqueuedMarkets: { select: { marketId: true } },
         },
       }),
       prisma.agent.count({ where }),
@@ -131,6 +132,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         owner: a.owner,
         strategy: a.strategy,
         template: a.template,
+        enqueuedMarketIds: a.enqueuedMarkets.map((m) => m.marketId),
       })),
       total,
       limit,
@@ -193,6 +195,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         strategy: true,
         template: { select: { id: true, name: true } },
         openclaw: true,
+        enqueuedMarkets: { select: { marketId: true } },
       },
     });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
@@ -203,6 +206,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       owner: agent.owner,
       strategy: agent.strategy,
       template: agent.template,
+      enqueuedMarketIds: agent.enqueuedMarkets.map((m) => m.marketId),
     };
     return reply.send(payload);
   });
