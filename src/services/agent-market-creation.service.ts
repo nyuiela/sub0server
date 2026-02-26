@@ -11,6 +11,8 @@ import {
   getNextGrokModel,
   recordRateLimit,
 } from "../lib/llm-rotation.js";
+import { computeQuestionId } from "../lib/cre-question-id.js";
+import { getPrismaClient } from "../lib/prisma.js";
 import type {
   AgentMarketSuggestion,
   CreCreateMarketPayload,
@@ -20,7 +22,7 @@ import type {
 const DEFAULT_DURATION_SECONDS = 86400;
 const DEFAULT_OUTCOME_SLOT_COUNT = 2;
 const ORACLE_TYPE_PLATFORM = 1;
-const MARKET_TYPE_PUBLIC = 2;
+const MARKET_TYPE_PUBLIC = 1;
 const MAX_QUESTION_LENGTH = 256;
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -278,8 +280,8 @@ function toCrePayload(
       : DEFAULT_DURATION_SECONDS;
   const outcomeSlotCount =
     suggestion.outcomeSlotCount != null &&
-    suggestion.outcomeSlotCount >= 2 &&
-    suggestion.outcomeSlotCount <= 255
+      suggestion.outcomeSlotCount >= 2 &&
+      suggestion.outcomeSlotCount <= 255
       ? suggestion.outcomeSlotCount
       : DEFAULT_OUTCOME_SLOT_COUNT;
 
@@ -359,4 +361,24 @@ export async function generateAgentMarkets(
     ...grokFiltered.map((s) => toCrePayload(s, "grok")),
     ...openWebUiFiltered.map((s) => toCrePayload(s, "openwebui")),
   ];
+}
+
+/**
+ * Filters out payloads whose questionId already exists in the DB (avoid duplicate CRE create).
+ */
+export async function filterPayloadsByExistingQuestionId(
+  payloads: CreCreateMarketPayload[]
+): Promise<CreCreateMarketPayload[]> {
+  if (payloads.length === 0) return [];
+  const prisma = getPrismaClient();
+  const filtered: CreCreateMarketPayload[] = [];
+  for (const p of payloads) {
+    const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
+    const existing = await prisma.market.findUnique({
+      where: { questionId: qid },
+      select: { id: true },
+    });
+    if (!existing) filtered.push(p);
+  }
+  return filtered;
 }

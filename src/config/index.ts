@@ -151,6 +151,41 @@ function makeConfig() {
     get defaultCollateralToken(): string {
       return optionalEnv("DEFAULT_COLLATERAL_TOKEN", "0x0000000000000000000000000000000000000000");
     },
+    /** RPC URL for Sub0 chain (e.g. Sepolia). When set, CRE pending markets are polled via getMarket(questionId) and persisted. */
+    get chainRpcUrl(): string | undefined {
+      return process.env.CHAIN_RPC_URL?.trim() || process.env.SEPOLIA_RPC_URL?.trim() || undefined;
+    },
+    /** Private key for signing chain txs (e.g. predictionVault.seedMarketLiquidity). Must be owner of predictionVault. */
+    get contractPrivateKey(): `0x${string}` | undefined {
+      const k = process.env.CONTRACT_PRIVATE_KEY?.trim();
+      return k?.startsWith("0x") ? (k as `0x${string}`) : k ? (`0x${k}` as `0x${string}`) : undefined;
+    },
+    /** USDC amount for predictionVault.seedMarketLiquidity in smallest units (6 decimals). Use PLATFORM_INITIAL_LIQUIDITY_RAW for raw bigint, else PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME (number) * 10^6. */
+    get platformSeedAmountUsdcRaw(): bigint {
+      const raw = process.env.PLATFORM_INITIAL_LIQUIDITY_RAW?.trim();
+      if (raw) {
+        try {
+          return BigInt(raw);
+        } catch {
+          // fallback
+        }
+      }
+      const perOutcome = process.env.PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME?.trim();
+      if (perOutcome) {
+        try {
+          const n = Number(perOutcome);
+          if (Number.isFinite(n) && n >= 0) return BigInt(Math.floor(n)) * BigInt(1e6);
+          return BigInt(perOutcome);
+        } catch {
+          try {
+            return BigInt(perOutcome);
+          } catch {
+            // fallback
+          }
+        }
+      }
+      return BigInt(Math.floor(this.platformInitialLiquidityPerOutcome)) * BigInt(1e6);
+    },
     /** Gemini model for market generation (primary; first of geminiModelsListing). */
     get geminiModel(): string {
       return this.geminiModelsListing[0] ?? optionalEnv("GEMINI_MODEL", "gemini-2.0-flash");

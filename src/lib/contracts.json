@@ -1,0 +1,23 @@
+{
+  "chainId": 11155111,
+  "chainSelectorName": "ethereum-testnet-sepolia",
+  "chainRpcUrl": "https://sepolia.drpc.org",
+  "contracts": {
+    "sub0": "0x45bec1219aE7442C93CBB32d63Df374d94e1df2A",
+    "predictionVault": "0x37Ad1be17Be247854F9D4F8Af95eeEFFDe0b179E",
+    "conditionalTokens": "0xB01f9A7824fc1ffEF9c428AA8C0225b0e308a4F4",
+    "vault": "0xBc42ECC32C2Da4a9473404dc6549493Aa3684383",
+    "usdc": "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE",
+    "hub": "0x7768784fb990fCFfA221F6beDC76da1f6Ac195A2"
+  },
+  "eip712": {
+    "domainName": "Sub0PredictionVault",
+    "domainVersion": "1",
+    "quoteTypeName": "LMSRQuote(bytes32 questionId,uint256 outcomeIndex,bool buy,uint256 quantity,uint256 tradeCostUsdc,uint256 nonce,uint256 deadline)"
+  },
+  "conventions": {
+    "usdcDecimals": 6,
+    "outcomeTokenDecimals": 18,
+    "parentCollectionId": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

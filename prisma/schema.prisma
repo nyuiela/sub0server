@@ -236,6 +236,8 @@ model Market {
   status              MarketStatus    @default(OPEN)
   collateralToken     String
   conditionId         String          @unique
+  /** On-chain questionId (keccak256(encodePacked(question, creator, oracle))). Used to dedupe and poll CRE-created markets. */
+  questionId          String?         @unique
   platform            MarketPlatform  @default(NATIVE)
   /** Which AI agent created this market (e.g. gemini, grok). Internal only; not exposed on public API. */
   agentSource         String?        // gemini | grok
@@ -260,6 +262,7 @@ model Market {
   @@index([creatorAddress])
   @@index([status])
   @@index([conditionId])
+  @@index([questionId])
   @@index([platform])
 }
 
