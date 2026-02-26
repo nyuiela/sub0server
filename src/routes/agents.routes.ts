@@ -159,7 +159,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         where,
         take: limit,
         skip: offset,
-        orderBy: { createdAt: "desc" },
+        orderBy: [{ tradedAmount: "desc" }, { createdAt: "desc" }],
         select: {
           id: true,
           name: true,
