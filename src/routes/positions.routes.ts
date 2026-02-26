@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "../lib/prisma.js";
+import { config } from "../config/index.js";
 import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { requireUserOrApiKey, requirePositionOwnerOrApiKey } from "../lib/permissions.js";
 import {
@@ -43,12 +44,15 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
     }
     const { marketId, userId, agentId, address, status, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
+    const hasOwnerFilter = userId ?? agentId ?? address;
+    const platformAddr = config.platformLiquidityAddress?.trim();
     const where = {
       ...(marketId ? { marketId } : {}),
       ...(userId ? { userId } : {}),
       ...(agentId ? { agentId } : {}),
       ...(address ? { address } : {}),
       ...(status ? { status } : {}),
+      ...(!hasOwnerFilter && platformAddr ? { address: { not: platformAddr } } : {}),
     };
     const [positions, total] = await Promise.all([
       prisma.position.findMany({

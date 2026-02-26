@@ -9,6 +9,8 @@ import {
   agentUpdateSchema,
   agentQuerySchema,
   agentPublicListSchema,
+  CRE_PENDING_PUBLIC_KEY,
+  CRE_PENDING_PRIVATE_KEY,
   type AgentCreateInput,
   type AgentUpdateInput,
   type AgentQueryInput,
@@ -333,9 +335,11 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     if (!address || !address.startsWith("0x")) {
       return reply.code(502).send({ error: "CRE did not return a valid address", detail: text });
     }
+    const updateData: { walletAddress: string; publicKey?: string } = { walletAddress: address };
+    if (existing.publicKey === CRE_PENDING_PUBLIC_KEY) updateData.publicKey = address;
     const agent = await prisma.agent.update({
       where: { id: agentId },
-      data: { walletAddress: address },
+      data: updateData,
       include: {
         owner: { select: { id: true, address: true } },
         strategy: true,
@@ -438,13 +442,15 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     const prisma = getPrismaClient();
     const owner = await prisma.user.findUnique({ where: { id: parsed.data.ownerId } });
     if (!owner) return reply.code(404).send({ error: "Owner not found" });
+    const publicKey = parsed.data.publicKey?.trim() ?? CRE_PENDING_PUBLIC_KEY;
+    const encryptedPrivateKey = parsed.data.encryptedPrivateKey?.trim() ?? CRE_PENDING_PRIVATE_KEY;
     const agent = await prisma.agent.create({
       data: {
         ownerId: parsed.data.ownerId,
         name: parsed.data.name,
         persona: parsed.data.persona,
-        publicKey: parsed.data.publicKey,
-        encryptedPrivateKey: parsed.data.encryptedPrivateKey,
+        publicKey,
+        encryptedPrivateKey,
         modelSettings: parsed.data.modelSettings as Prisma.InputJsonValue,
         templateId: parsed.data.templateId ?? undefined,
       },

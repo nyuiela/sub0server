@@ -2,12 +2,18 @@ import { z } from "zod";
 
 const agentStatusEnum = z.enum(["ACTIVE", "PAUSED", "DEPLETED", "EXPIRED"]);
 
+/** Placeholders when creating agent without keys; create-wallet (CRE) will set walletAddress. */
+export const CRE_PENDING_PUBLIC_KEY = "0x0000000000000000000000000000000000000000";
+export const CRE_PENDING_PRIVATE_KEY = "CRE_PENDING";
+
 export const agentCreateSchema = z.object({
   ownerId: z.string().uuid(),
   name: z.string().min(1),
   persona: z.string().min(1),
-  publicKey: z.string().min(1),
-  encryptedPrivateKey: z.string().min(1),
+  /** Optional: when omitted, backend uses placeholder and caller should call create-wallet (CRE) next. */
+  publicKey: z.string().min(1).optional(),
+  /** Optional: when omitted, backend uses placeholder and caller should call create-wallet (CRE) next. */
+  encryptedPrivateKey: z.string().min(1).optional(),
   modelSettings: z.record(z.unknown()),
   templateId: z.string().uuid().optional().nullable(),
 });

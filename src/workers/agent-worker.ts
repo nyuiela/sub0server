@@ -14,8 +14,9 @@ interface AgentJobPayload {
 async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
   const { marketId, agentId } = job.data;
   console.log(`Agent job received: marketId=${marketId} agentId=${agentId}`);
-  // Prediction/trade logic was built for the previous schema (probability, poolLong, poolShort, PriceFeed).
-  // With the new platform schema (Market with conditionId, outcomes, etc.) implement custom agent logic here.
+  // This worker does not place orders or open positions. Enqueue only adds the market to the agent's list.
+  // To have the agent trade: an external runner or script must call POST /api/orders with x-api-key and body.agentId.
+  // On-chain execution (PredictionVault executeTrade) uses CRE to sign DON quotes; in-app order book does not call CRE.
 }
 
 async function main(): Promise<void> {
