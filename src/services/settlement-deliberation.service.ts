@@ -5,6 +5,11 @@
  */
 
 import { config } from "../config/index.js";
+import {
+  getNextGeminiKeyMarketCreation,
+  getNextGeminiModelListing,
+  recordRateLimit,
+} from "../lib/llm-rotation.js";
 import type {
   SettlementVerdict,
   DeliberationResult,
@@ -63,9 +68,11 @@ async function callGeminiForVerdict(
   prompt: string,
   model: string
 ): Promise<{ outcomeString: string; outcomeArray: OutcomeArray; reason?: string }> {
-  const apiKey = config.geminiApiKey;
+  const apiKey = getNextGeminiKeyMarketCreation() ?? config.geminiApiKey;
   if (!apiKey?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set for settlement deliberation");
+    throw new Error(
+      "GEMINI_API_KEY_MARKET_CREATION_1/2/3 or GEMINI_API_KEYS_MARKET_CREATION or GEMINI_API_KEY is not set for settlement deliberation"
+    );
   }
   const url = `${GEMINI_URL}/${model}:generateContent?key=${apiKey}`;
   const res = await fetch(url, {
@@ -81,6 +88,10 @@ async function callGeminiForVerdict(
     }),
   });
   if (!res.ok) {
+    if (res.status === 429) {
+      recordRateLimit("gemini_market");
+      recordRateLimit("gemini_model");
+    }
     const text = await res.text();
     throw new Error(`Gemini settlement error ${res.status}: ${text.slice(0, 300)}`);
   }
@@ -118,7 +129,7 @@ export async function runTwoAgentDeliberation(
   payload: SettlementRequestPayload
 ): Promise<DeliberationResult> {
   const { question, outcomes, rules } = payload;
-  const model = config.geminiModel;
+  const model = getNextGeminiModelListing();
 
   const promptA = buildVerdictPrompt(question, outcomes, rules, "opinion");
   const promptB = buildVerdictPrompt(question, outcomes, rules, "opinion");

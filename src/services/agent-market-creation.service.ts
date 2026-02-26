@@ -1,9 +1,16 @@
 /**
  * Agent market creation: generates prediction market questions via Gemini and Grok (XAI).
- * Strict rules: current year, likely future events only. Each payload tagged with agentSource (gemini | grok).
+ * Strict rules: current year, likely future events only. Each payload tagged with agentSource (gemini | grok | openwebui).
  */
 
 import { config } from "../config/index.js";
+import {
+  getNextGeminiKeyMarketCreation,
+  getNextGeminiModelListing,
+  getNextGrokKey,
+  getNextGrokModel,
+  recordRateLimit,
+} from "../lib/llm-rotation.js";
 import type {
   AgentMarketSuggestion,
   CreCreateMarketPayload,
@@ -42,12 +49,15 @@ function buildUserPrompt(count: number): string {
 }
 
 async function callGemini(count: number): Promise<AgentMarketSuggestion[]> {
-  const apiKey = config.geminiApiKey;
+  const apiKey = getNextGeminiKeyMarketCreation() ?? config.geminiApiKey;
   if (!apiKey?.trim()) {
-    throw new Error("GEMINI_API_KEY is not set; cannot generate agent markets");
+    throw new Error(
+      "GEMINI_API_KEY_MARKET_CREATION_1/2/3 or GEMINI_API_KEYS_MARKET_CREATION or GEMINI_API_KEY is not set; cannot generate agent markets"
+    );
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${apiKey}`;
+  const model = getNextGeminiModelListing();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = {
     contents: [
       {
@@ -72,6 +82,10 @@ async function callGemini(count: number): Promise<AgentMarketSuggestion[]> {
 
   if (!res.ok) {
     const text = await res.text();
+    if (res.status === 429) {
+      recordRateLimit("gemini_market");
+      recordRateLimit("gemini_model");
+    }
     throw new Error(`Gemini API error ${res.status}: ${text.slice(0, 500)}`);
   }
 
@@ -88,16 +102,85 @@ async function callGemini(count: number): Promise<AgentMarketSuggestion[]> {
   return parseSuggestionsFromText(text);
 }
 
+/** Strip Open WebUI reasoning block so we get only the final reply text. */
+function stripOpenWebUiReasoning(content: string): string {
+  const withoutDetails = content.replace(
+    /<details[^>]*type="reasoning"[^>]*>[\s\S]*?<\/details>/gi,
+    ""
+  );
+  return withoutDetails.replace(/<[^>]+>/g, "").trim();
+}
+
+/** Extract assistant text from Open WebUI / OpenAI-style completion response. */
+function extractAssistantContent(body: Record<string, unknown>): string | null {
+  const choices = body.choices as Array<{ message?: { content?: string } }> | undefined;
+  if (Array.isArray(choices) && choices[0]?.message?.content) {
+    return choices[0].message.content;
+  }
+  const messages = body.messages as Array<{ role?: string; content?: string }> | undefined;
+  if (Array.isArray(messages)) {
+    const assistant = messages.filter((m) => m.role === "assistant").pop();
+    if (assistant?.content) return assistant.content;
+  }
+  if (typeof body.content === "string") return body.content;
+  return null;
+}
+
+/** Open WebUI (OpenUI) chat completions: OpenAI-compatible /api/chat/completions, non-stream. */
+async function callOpenWebUI(count: number): Promise<AgentMarketSuggestion[]> {
+  const baseUrl = config.openWebUiBaseUrl;
+  const apiKey = config.openWebUiApiKey;
+  if (!baseUrl) return [];
+
+  const url = `${baseUrl}/api/chat/completions`;
+  const body = {
+    stream: false,
+    model: config.openWebUiModel,
+    messages: [
+      {
+        role: "user" as const,
+        content: buildSystemPrompt() + "\n\n" + buildUserPrompt(count),
+      },
+    ],
+  };
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Open WebUI API error ${res.status}: ${text.slice(0, 500)}`);
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  if ((data as { status?: boolean }).status === true && (data as { task_id?: string }).task_id) {
+    return [];
+  }
+
+  const rawContent = extractAssistantContent(data);
+  if (!rawContent?.trim()) return [];
+
+  const text = stripOpenWebUiReasoning(rawContent);
+  return parseSuggestionsFromText(text);
+}
+
 /** Grok (XAI) chat completions: https://api.x.ai/v1/chat/completions */
 async function callGrok(count: number): Promise<AgentMarketSuggestion[]> {
-  const apiKey = config.grokApiKey;
+  const apiKey = getNextGrokKey() ?? config.grokApiKey;
   if (!apiKey?.trim()) {
     return [];
   }
 
+  const model = getNextGrokModel();
   const url = "https://api.x.ai/v1/chat/completions";
   const body = {
-    model: config.grokModel,
+    model,
     messages: [
       {
         role: "user",
@@ -121,6 +204,10 @@ async function callGrok(count: number): Promise<AgentMarketSuggestion[]> {
   });
 
   if (!res.ok) {
+    if (res.status === 429) {
+      recordRateLimit("grok_key");
+      recordRateLimit("grok_model");
+    }
     const text = await res.text();
     throw new Error(`Grok API error ${res.status}: ${text.slice(0, 500)}`);
   }
@@ -206,38 +293,71 @@ function toCrePayload(
     marketType: MARKET_TYPE_PUBLIC,
     creatorAddress: config.platformCreatorAddress,
     agentSource,
+    amountUsdc: config.agentMarketAmountUsdc,
   };
 }
 
 /**
- * Generates agent market payloads from both Gemini and Grok (if keys set).
- * Splits requested count between the two; each payload is tagged with agentSource.
+ * Generates agent market payloads from Gemini, Grok, and Open WebUI (when configured).
+ * Count is per-source: e.g. count=5 with Gemini + XAI + Open WebUI => 5+5+5 = 15 total markets.
+ * Total is capped by agentMarketsPerJob.
  */
 export async function generateAgentMarkets(
   count: number
 ): Promise<CreCreateMarketPayload[]> {
-  const cap = Math.min(count, config.agentMarketsPerJob);
-  if (cap < 1) return [];
+  if (count < 1) return [];
 
-  const half = Math.max(1, Math.floor(cap / 2));
-  const geminiCount = half;
-  const grokCount = cap - half;
+  const useOpenWebUi = Boolean(config.openWebUiBaseUrl);
+  const parts = useOpenWebUi ? 3 : 2;
+  const maxTotal = config.agentMarketsPerJob;
+  const perSourceCount = Math.max(
+    1,
+    Math.min(count, Math.floor(maxTotal / parts))
+  );
+  const geminiCount = perSourceCount;
+  const grokCount = perSourceCount;
+  const openWebUiCount = useOpenWebUi ? perSourceCount : 0;
 
-  const [geminiSuggestions, grokSuggestions] = await Promise.all([
-    callGemini(geminiCount),
-    callGrok(grokCount),
-  ]);
+  const safeCallGemini = (): Promise<AgentMarketSuggestion[]> =>
+    callGemini(geminiCount).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("429")) {
+        recordRateLimit("gemini_market");
+        recordRateLimit("gemini_model");
+      }
+      return [];
+    });
+  const safeCallGrok = (): Promise<AgentMarketSuggestion[]> =>
+    callGrok(grokCount).catch(() => []);
+  const safeCallOpenWebUI = (): Promise<AgentMarketSuggestion[]> =>
+    callOpenWebUI(openWebUiCount).catch(() => []);
+
+  const tasks: Promise<AgentMarketSuggestion[]>[] = [
+    safeCallGemini(),
+    safeCallGrok(),
+  ];
+  if (openWebUiCount > 0) {
+    tasks.push(safeCallOpenWebUI());
+  }
+
+  const [geminiSuggestions, grokSuggestions, openWebUiSuggestions = []] =
+    await Promise.all(tasks);
 
   const geminiFiltered = filterSuggestions(geminiSuggestions).slice(
     0,
     geminiCount
   );
   const grokFiltered = filterSuggestions(grokSuggestions).slice(0, grokCount);
+  const openWebUiFiltered = filterSuggestions(openWebUiSuggestions).slice(
+    0,
+    openWebUiCount
+  );
 
   const out: CreCreateMarketPayload[] = [
     ...geminiFiltered.map((s) => toCrePayload(s, "gemini")),
     ...grokFiltered.map((s) => toCrePayload(s, "grok")),
+    ...openWebUiFiltered.map((s) => toCrePayload(s, "openwebui")),
   ];
 
-  return out.slice(0, cap);
+  return out.slice(0, maxTotal);
 }

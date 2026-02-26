@@ -11,7 +11,7 @@ export interface AgentMarketSuggestion {
 }
 
 /** Which AI agent generated the market; stored on Market.agentSource, not exposed on public API. */
-export type AgentSource = "gemini" | "grok";
+export type AgentSource = "gemini" | "grok" | "openwebui";
 
 /**
  * Payload for CRE createMarket action (HTTP body).

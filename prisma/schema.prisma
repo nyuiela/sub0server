@@ -116,11 +116,34 @@ model Agent {
   tracks      AgentTrack[]
   reasoningLogs AgentReasoning[]
   enqueuedMarkets AgentEnqueuedMarket[]
+  pendingTrades   PendingAgentTrade[]
   registrationClaimed AgentRegistration?
 
   @@index([ownerId])
   @@index([status])
   @@index([templateId])
+}
+
+/// Agent trade intents that could not be executed (no wallet or insufficient balance). Shown as pending until wallet/funds available.
+model PendingAgentTrade {
+  id           String   @id @default(uuid())
+  agentId      String
+  marketId     String
+  outcomeIndex Int      @default(0)
+  side         String   // BID | ASK
+  quantity     Decimal  @db.Decimal(28, 18)
+  status       String   @default("PENDING") // PENDING | FULFILLED | CANCELLED
+  pendingReason String  // NO_WALLET | INSUFFICIENT_BALANCE
+  orderId      String?  // set when later fulfilled
+  createdAt    DateTime @default(now())
+  fulfilledAt  DateTime?
+
+  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([marketId])
+  @@index([status])
 }
 
 /// Markets enqueued for an agent (add-to-agent on Markets page). Used to show "Added (N)" and persist across sessions.
@@ -231,6 +254,7 @@ model Market {
   aiLogs    AiLog[]
   agentReasons AgentReasoning[]
   agentEnqueuedMarkets AgentEnqueuedMarket[]
+  pendingAgentTrades   PendingAgentTrade[]
   settlementLogs      MarketSettlementLog[]
 
   @@index([creatorAddress])

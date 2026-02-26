@@ -216,6 +216,27 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(payload);
   });
 
+  /** Agent wallet status: balance and whether the agent has a trading wallet. Used by agents/worker before placing orders. */
+  app.get("/api/agents/:id/wallet-status", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+    const prisma = getPrismaClient();
+    const agent = await prisma.agent.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, balance: true, walletAddress: true, publicKey: true },
+    });
+    if (!agent) return reply.code(404).send({ error: "Agent not found" });
+    const walletAddr = agent.walletAddress?.trim();
+    const pubKey = agent.publicKey?.trim();
+    const hasWallet = Boolean(
+      (walletAddr && walletAddr !== CRE_PENDING_PUBLIC_KEY) ||
+        (pubKey && pubKey !== CRE_PENDING_PUBLIC_KEY)
+    );
+    return reply.send({
+      balance: agent.balance.toString(),
+      hasWallet,
+    });
+  });
+
   app.patch("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
     if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const parsed = agentUpdateSchema.safeParse(req.body);

@@ -1,11 +1,12 @@
 /**
  * Optional in-process job: POST createMarketsFromBackend to CRE on an interval.
- * Only runs when config.creMarketCronEnabled and config.creHttpUrl are set.
- * CRE must be deployed and listening; this just triggers it periodically.
+ * When creMarketCronBatchPayload is true (default), backend generates markets and sends
+ * them in the request body so CRE creates all in one run and uses one batch callback (no HTTP cap).
  */
 
 import type { FastifyBaseLogger } from "fastify";
 import { config } from "../config/index.js";
+import { generateAgentMarkets } from "./agent-market-creation.service.js";
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -18,6 +19,18 @@ async function triggerCreateMarketsFromBackend(log: FastifyBaseLogger): Promise<
   if (config.creMarketCronBroadcast) {
     body.broadcast = true;
     log.info("CRE cron sending broadcast=true (real onchain txs)");
+  }
+  if (config.creMarketCronBatchPayload) {
+    try {
+      const count = config.agentMarketsPerJob;
+      const payloads = await generateAgentMarkets(count);
+      if (payloads.length > 0) {
+        body.markets = payloads;
+        log.info({ count: payloads.length }, "CRE cron sending markets in body (batch create)");
+      }
+    } catch (err) {
+      log.warn({ err }, "Agent market generation failed; CRE will fetch via GET (cap 4)");
+    }
   }
   try {
     const res = await fetch(url, {

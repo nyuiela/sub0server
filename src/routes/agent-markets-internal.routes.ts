@@ -13,8 +13,10 @@ import { generateAgentMarkets } from "../services/agent-market-creation.service.
 import { config } from "../config/index.js";
 import {
   onchainMarketCreatedSchema,
+  onchainMarketCreatedBatchSchema,
   agentMarketsQuerySchema,
   type OnchainMarketCreatedInput,
+  type OnchainMarketCreatedBatchInput,
   type AgentMarketsQueryInput,
 } from "../schemas/agent-markets.schema.js";
 
@@ -41,6 +43,57 @@ function serializeMarket(market: {
     volume: market.volume.toString(),
     resolutionDate: market.resolutionDate.toISOString(),
     liquidity: market.liquidity?.toString() ?? null,
+  };
+}
+
+async function createMarketFromOnchainResult(
+  body: OnchainMarketCreatedInput
+): Promise<{ market: ReturnType<typeof serializeMarket>; createMarketTxHash: string }> {
+  const prisma = getPrismaClient();
+  const existing = await prisma.market.findUnique({
+    where: { conditionId: body.questionId },
+  });
+  if (existing) {
+    throw Object.assign(new Error("Market with this conditionId already exists"), {
+      code: "CONFLICT" as const,
+      marketId: existing.id,
+    });
+  }
+  const resolutionDate = new Date(Date.now() + body.duration * 1000);
+  const outcomes =
+    body.outcomeSlotCount === 2
+      ? ["Yes", "No"]
+      : Array.from({ length: body.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`);
+  const market = await prisma.market.create({
+    data: {
+      name: body.question,
+      creatorAddress: body.creatorAddress,
+      context: null,
+      outcomes: outcomes as object,
+      resolutionDate,
+      oracleAddress: body.oracle,
+      collateralToken: config.defaultCollateralToken,
+      conditionId: body.questionId,
+      platform: "NATIVE",
+      agentSource: body.agentSource ?? null,
+    },
+  });
+  const outcomeCount = outcomes.length;
+  const outcomePositionIds = market.outcomePositionIds as string[] | null;
+  await createPlatformPositionsForMarket(
+    market.id,
+    outcomeCount,
+    market.collateralToken,
+    Array.isArray(outcomePositionIds) ? outcomePositionIds : null
+  );
+  await broadcastMarketUpdate({
+    marketId: market.id,
+    reason: MARKET_UPDATE_REASON.CREATED,
+    volume: market.volume.toString(),
+  });
+  return {
+    market: serializeMarket(market),
+    createMarketTxHash: body.createMarketTxHash,
   };
 }
 
@@ -78,57 +131,52 @@ export async function registerAgentMarketsInternalRoutes(
           details: parsed.error.flatten(),
         });
       }
-      const body = parsed.data as OnchainMarketCreatedInput;
-      const prisma = getPrismaClient();
-      const existing = await prisma.market.findUnique({
-        where: { conditionId: body.questionId },
-      });
-      if (existing) {
-        return reply.code(409).send({
-          error: "Market with this conditionId already exists",
-          marketId: existing.id,
+      try {
+        const { market, createMarketTxHash } = await createMarketFromOnchainResult(
+          parsed.data as OnchainMarketCreatedInput
+        );
+        return reply.code(201).send({ ...market, createMarketTxHash });
+      } catch (err) {
+        if (err && typeof err === "object" && (err as { code?: string }).code === "CONFLICT") {
+          return reply.code(409).send({
+            error: (err as Error).message,
+            marketId: (err as { marketId?: string }).marketId,
+          });
+        }
+        throw err;
+      }
+    }
+  );
+
+  app.post(
+    "/api/internal/markets/onchain-created-batch",
+    async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+      if (!requireApiKeyOnly(req, reply)) return;
+      const parsed = onchainMarketCreatedBatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten(),
         });
       }
-
-      const resolutionDate = new Date(Date.now() + body.duration * 1000);
-      const outcomes =
-        body.outcomeSlotCount === 2
-          ? ["Yes", "No"]
-          : Array.from({ length: body.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`);
-
-      const market = await prisma.market.create({
-        data: {
-          name: body.question,
-          creatorAddress: body.creatorAddress,
-          context: null,
-          outcomes: outcomes as object,
-          resolutionDate,
-          oracleAddress: body.oracle,
-          collateralToken: config.defaultCollateralToken,
-          conditionId: body.questionId,
-          platform: "NATIVE",
-          agentSource: body.agentSource ?? null,
-        },
-      });
-
-      const outcomeCount = outcomes.length;
-      const outcomePositionIds = market.outcomePositionIds as string[] | null;
-      await createPlatformPositionsForMarket(
-        market.id,
-        outcomeCount,
-        market.collateralToken,
-        Array.isArray(outcomePositionIds) ? outcomePositionIds : null
-      );
-      await broadcastMarketUpdate({
-        marketId: market.id,
-        reason: MARKET_UPDATE_REASON.CREATED,
-        volume: market.volume.toString(),
-      });
-
-      return reply.code(201).send({
-        ...serializeMarket(market),
-        createMarketTxHash: body.createMarketTxHash,
-      });
+      const batch = parsed.data as OnchainMarketCreatedBatchInput;
+      const results: { questionId: string; createMarketTxHash: string; market?: unknown; error?: string }[] = [];
+      for (const body of batch.markets) {
+        try {
+          const { market, createMarketTxHash } = await createMarketFromOnchainResult(body);
+          results.push({ questionId: body.questionId, createMarketTxHash, market });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const conflict = err && typeof err === "object" && (err as { code?: string }).code === "CONFLICT";
+          results.push({
+            questionId: body.questionId,
+            createMarketTxHash: body.createMarketTxHash,
+            error: msg,
+            ...(conflict && { marketId: (err as { marketId?: string }).marketId }),
+          });
+        }
+      }
+      return reply.code(200).send({ created: results.filter((r) => !r.error).length, failed: results.filter((r) => r.error).length, results });
     }
   );
 
@@ -161,57 +209,45 @@ export async function registerAgentMarketsInternalRoutes(
           details: parsed.error.flatten(),
         });
       }
-      const body = parsed.data as OnchainMarketCreatedInput;
-      const prisma = getPrismaClient();
-      const existing = await prisma.market.findUnique({
-        where: { conditionId: body.questionId },
-      });
-      if (existing) {
-        return reply.code(409).send({
-          error: "Market with this conditionId already exists",
-          marketId: existing.id,
+      try {
+        const { market, createMarketTxHash } = await createMarketFromOnchainResult(
+          parsed.data as OnchainMarketCreatedInput
+        );
+        return reply.code(201).send({ ...market, createMarketTxHash });
+      } catch (err) {
+        if (err && typeof err === "object" && (err as { code?: string }).code === "CONFLICT") {
+          return reply.code(409).send({
+            error: (err as Error).message,
+            marketId: (err as { marketId?: string }).marketId,
+          });
+        }
+        throw err;
+      }
+    }
+  );
+
+  app.post(
+    "/api/cre/markets/onchain-created-batch",
+    async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+      const parsed = onchainMarketCreatedBatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten(),
         });
       }
-
-      const resolutionDate = new Date(Date.now() + body.duration * 1000);
-      const outcomes =
-        body.outcomeSlotCount === 2
-          ? ["Yes", "No"]
-          : Array.from({ length: body.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`);
-
-      const market = await prisma.market.create({
-        data: {
-          name: body.question,
-          creatorAddress: body.creatorAddress,
-          context: null,
-          outcomes: outcomes as object,
-          resolutionDate,
-          oracleAddress: body.oracle,
-          collateralToken: config.defaultCollateralToken,
-          conditionId: body.questionId,
-          platform: "NATIVE",
-          agentSource: body.agentSource ?? null,
-        },
-      });
-
-      const outcomeCount = outcomes.length;
-      const outcomePositionIds = market.outcomePositionIds as string[] | null;
-      await createPlatformPositionsForMarket(
-        market.id,
-        outcomeCount,
-        market.collateralToken,
-        Array.isArray(outcomePositionIds) ? outcomePositionIds : null
-      );
-      await broadcastMarketUpdate({
-        marketId: market.id,
-        reason: MARKET_UPDATE_REASON.CREATED,
-        volume: market.volume.toString(),
-      });
-
-      return reply.code(201).send({
-        ...serializeMarket(market),
-        createMarketTxHash: body.createMarketTxHash,
-      });
+      const batch = parsed.data as OnchainMarketCreatedBatchInput;
+      const results: { questionId: string; createMarketTxHash: string; market?: unknown; error?: string }[] = [];
+      for (const body of batch.markets) {
+        try {
+          const { market, createMarketTxHash } = await createMarketFromOnchainResult(body);
+          results.push({ questionId: body.questionId, createMarketTxHash, market });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          results.push({ questionId: body.questionId, createMarketTxHash: body.createMarketTxHash, error: msg });
+        }
+      }
+      return reply.code(200).send({ created: results.filter((r) => !r.error).length, failed: results.filter((r) => r.error).length, results });
     }
   );
 }

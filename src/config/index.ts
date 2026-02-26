@@ -88,9 +88,45 @@ function makeConfig() {
     get agentMarketsPerJob(): number {
       return Math.max(1, Math.min(50, Number(optionalEnv("AGENT_MARKETS_PER_JOB", "10"))));
     },
-    /** Gemini API key for AI-generated market questions. Optional; if unset, agent-markets endpoint returns empty or errors. */
+    /** Gemini API key for AI-generated market questions. Optional; fallback if GEMINI_API_KEYS_* not set. */
     get geminiApiKey(): string | undefined {
-      return process.env.GEMINI_API_KEY ?? undefined;
+      const list = this.geminiApiKeysMarketCreation;
+      return list[0] ?? process.env.GEMINI_API_KEY ?? undefined;
+    },
+    /** Comma-separated Gemini keys for trading agents (analysis/orders). Fallback: GEMINI_API_KEY_TRADING_1,2,3 or GEMINI_API_KEY. */
+    get geminiApiKeysTrading(): string[] {
+      const csv = process.env.GEMINI_API_KEYS_TRADING?.trim();
+      if (csv) return csv.split(",").map((k) => k.trim()).filter(Boolean);
+      const k1 = process.env.GEMINI_API_KEY_TRADING_1?.trim();
+      const k2 = process.env.GEMINI_API_KEY_TRADING_2?.trim();
+      const k3 = process.env.GEMINI_API_KEY_TRADING_3?.trim();
+      if (k1 || k2 || k3) return [k1, k2, k3].filter(Boolean) as string[];
+      const single = process.env.GEMINI_API_KEY?.trim();
+      return single ? [single] : [];
+    },
+    /** Comma-separated Gemini keys for market creation/listing. Fallback: GEMINI_API_KEY_MARKET_CREATION_1,2,3 or GEMINI_API_KEY_MARKET_1,2,3 or GEMINI_API_KEY. */
+    get geminiApiKeysMarketCreation(): string[] {
+      const csv = process.env.GEMINI_API_KEYS_MARKET_CREATION?.trim();
+      if (csv) return csv.split(",").map((k) => k.trim()).filter(Boolean);
+      const k1 =
+        process.env.GEMINI_API_KEY_MARKET_CREATION_1?.trim() ??
+        process.env.GEMINI_API_KEY_MARKET_1?.trim();
+      const k2 =
+        process.env.GEMINI_API_KEY_MARKET_CREATION_2?.trim() ??
+        process.env.GEMINI_API_KEY_MARKET_2?.trim();
+      const k3 =
+        process.env.GEMINI_API_KEY_MARKET_CREATION_3?.trim() ??
+        process.env.GEMINI_API_KEY_MARKET_3?.trim();
+      if (k1 || k2 || k3) return [k1, k2, k3].filter(Boolean) as string[];
+      const single = process.env.GEMINI_API_KEY?.trim();
+      return single ? [single] : [];
+    },
+    /** Gemini models for listing/market creation (comma-separated or GEMINI_MODELS). First is primary. */
+    get geminiModelsListing(): string[] {
+      const csv = process.env.GEMINI_MODELS?.trim();
+      if (csv) return csv.split(",").map((m) => m.trim()).filter(Boolean);
+      const m = process.env.GEMINI_MODEL?.trim();
+      return m ? [m] : [optionalEnv("GEMINI_MODEL", "gemini-2.0-flash")];
     },
     /** Platform oracle address for agent-created markets (Sub0 oracle). */
     get platformOracleAddress(): string {
@@ -100,21 +136,54 @@ function makeConfig() {
     get platformCreatorAddress(): string {
       return optionalEnv("PLATFORM_CREATOR_ADDRESS", "0x0000000000000000000000000000000000000000");
     },
+    /** Default USDC amount for agent-created market seed (CRE createMarket payload). Matches create-market-payload.json. */
+    get agentMarketAmountUsdc(): string {
+      return process.env.AGENT_MARKET_AMOUNT_USDC?.trim() || "1000000";
+    },
     /** Default collateral token address for agent-created markets (e.g. USDC). */
     get defaultCollateralToken(): string {
       return optionalEnv("DEFAULT_COLLATERAL_TOKEN", "0x0000000000000000000000000000000000000000");
     },
-    /** Gemini model for market generation (e.g. gemini-2.0-flash). */
+    /** Gemini model for market generation (primary; first of geminiModelsListing). */
     get geminiModel(): string {
-      return optionalEnv("GEMINI_MODEL", "gemini-2.0-flash");
+      return this.geminiModelsListing[0] ?? optionalEnv("GEMINI_MODEL", "gemini-2.0-flash");
     },
-    /** XAI API key (Grok is XAI; one key for both). Optional; if unset, only Gemini is used. */
+    /** XAI API keys (comma-separated or single XAI_API_KEY). Optional; if unset, only Gemini is used. */
+    get grokApiKeys(): string[] {
+      const csv = process.env.XAI_API_KEYS?.trim();
+      if (csv) return csv.split(",").map((k) => k.trim()).filter(Boolean);
+      const single = process.env.XAI_API_KEY ?? process.env.GROK_API_KEY ?? undefined;
+      return single?.trim() ? [single.trim()] : [];
+    },
     get grokApiKey(): string | undefined {
-      return process.env.XAI_API_KEY ?? process.env.GROK_API_KEY ?? undefined;
+      return this.grokApiKeys[0] ?? undefined;
     },
-    /** Grok/XAI model name (e.g. grok-2-mini, grok-3-mini). XAI_MODEL or GROK_MODEL. */
+    /** XAI/Grok models (comma-separated XAI_MODELS or XAI_MODEL_1/2/3 or single XAI_MODEL). */
+    get grokModels(): string[] {
+      const csv = process.env.XAI_MODELS?.trim();
+      if (csv) return csv.split(",").map((m) => m.trim()).filter(Boolean);
+      const m1 = process.env.XAI_MODEL_1?.trim();
+      const m2 = process.env.XAI_MODEL_2?.trim();
+      const m3 = process.env.XAI_MODEL_3?.trim();
+      if (m1 || m2 || m3) return [m1, m2, m3].filter(Boolean) as string[];
+      const m = process.env.XAI_MODEL ?? process.env.GROK_MODEL;
+      return m?.trim() ? [m.trim()] : [optionalEnv("XAI_MODEL", optionalEnv("GROK_MODEL", "grok-3-mini"))];
+    },
     get grokModel(): string {
-      return optionalEnv("XAI_MODEL", optionalEnv("GROK_MODEL", "grok-3-mini"));
+      return this.grokModels[0] ?? optionalEnv("XAI_MODEL", optionalEnv("GROK_MODEL", "grok-3-mini"));
+    },
+    /** Open WebUI (OpenUI) base URL for market creation and optional trading (e.g. https://ai.example.com). When set, agent markets can use this as a third source. */
+    get openWebUiBaseUrl(): string | undefined {
+      const u = process.env.OPENWEBUI_BASE_URL?.trim();
+      return u ? u.replace(/\/$/, "") : undefined;
+    },
+    /** Open WebUI API key (Bearer). Optional; if unset, Open WebUI is not used. */
+    get openWebUiApiKey(): string | undefined {
+      return process.env.OPENWEBUI_API_KEY?.trim() || undefined;
+    },
+    /** Open WebUI model name (e.g. gpt-oss:20b, llama3). */
+    get openWebUiModel(): string {
+      return process.env.OPENWEBUI_MODEL?.trim() || "gpt-oss:20b";
     },
     /** Base URL for claim links (e.g. https://app.sub0.xyz). Used in BYOA registration response. */
     get frontendBaseUrl(): string {
@@ -156,6 +225,18 @@ function makeConfig() {
     /** If true, cron sends broadcast: true to CRE so simulate runs with --broadcast (real onchain txs). Set in sub0server .env (CRE_MARKET_CRON_BROADCAST=true). Default false = dry run, no tx hash. */
     get creMarketCronBroadcast(): boolean {
       return process.env.CRE_MARKET_CRON_BROADCAST === "true" || process.env.CRE_MARKET_CRON_BROADCAST === "1";
+    },
+    /** If true (default), cron generates markets and sends them in the request body so CRE can create up to agentMarketsPerJob in one run with one batch callback. If false, CRE fetches via GET (cap 4 per run). */
+    get creMarketCronBatchPayload(): boolean {
+      return process.env.CRE_MARKET_CRON_BATCH_PAYLOAD !== "false" && process.env.CRE_MARKET_CRON_BATCH_PAYLOAD !== "0";
+    },
+    /** Backend base URL for worker to call POST /api/orders. Default: same host as this server (port from PORT). Backend typically runs on 4000. */
+    get backendUrl(): string {
+      return process.env.BACKEND_URL?.trim() || `http://localhost:${this.port}`;
+    },
+    /** If true, agent worker runs scout→analyze→trade (LLM + POST /api/orders). If false, worker only logs the job. */
+    get agentTradingEnabled(): boolean {
+      return process.env.AGENT_TRADING_ENABLED === "true" || process.env.AGENT_TRADING_ENABLED === "1";
     },
   };
 }

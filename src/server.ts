@@ -13,6 +13,7 @@ import { resolveRequestAuth } from "./lib/auth.js";
 import { registerAgentEnqueueRoutes } from "./routes/agent-enqueue.routes.js";
 import { registerUserRoutes } from "./routes/users.routes.js";
 import { registerAgentRoutes } from "./routes/agents.routes.js";
+import { registerAgentPendingTradesRoutes } from "./routes/agent-pending-trades.routes.js";
 import { registerMarketRoutes } from "./routes/markets.routes.js";
 import { registerAgentMarketsInternalRoutes } from "./routes/agent-markets-internal.routes.js";
 import { registerPositionRoutes } from "./routes/positions.routes.js";
@@ -27,6 +28,7 @@ import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerSdkAgentRoutes } from "./routes/sdk-agent.routes.js";
 import { registerSdkApiRoutes } from "./routes/sdk-api.routes.js";
 import { registerSettlementInternalRoutes } from "./routes/settlement-internal.routes.js";
+import { registerCreCallbackRoutes } from "./routes/cre-callback.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
 import { startCreMarketCron, stopCreMarketCron } from "./services/cre-market-cron.js";
 import type { Worker } from "bullmq";
@@ -43,7 +45,7 @@ await fastify.register(fastifyCors, {
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "api-key"],
 });
-fastify.register(fastifyWebsocket, {
+await fastify.register(fastifyWebsocket, {
   options: { maxPayload: 65536 },
 });
 
@@ -169,8 +171,10 @@ await registerAuthRoutes(fastify);
 await registerSdkAgentRoutes(fastify);
 await registerSdkApiRoutes(fastify);
 await registerSettlementInternalRoutes(fastify);
+await registerCreCallbackRoutes(fastify);
 await registerUserRoutes(fastify);
 await registerAgentRoutes(fastify);
+await registerAgentPendingTradesRoutes(fastify);
 await registerMarketRoutes(fastify);
 await registerAgentMarketsInternalRoutes(fastify);
 await registerPositionRoutes(fastify);

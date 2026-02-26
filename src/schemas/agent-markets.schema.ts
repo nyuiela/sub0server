@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const agentSourceSchema = z.enum(["gemini", "grok"]).optional();
+const agentSourceSchema = z.enum(["gemini", "grok", "openwebui"]).optional();
 
 export const onchainMarketCreatedSchema = z.object({
   questionId: z.string().min(1),
@@ -16,6 +16,12 @@ export const onchainMarketCreatedSchema = z.object({
 });
 
 export type OnchainMarketCreatedInput = z.infer<typeof onchainMarketCreatedSchema>;
+
+export const onchainMarketCreatedBatchSchema = z.object({
+  markets: z.array(onchainMarketCreatedSchema).min(1).max(100),
+});
+
+export type OnchainMarketCreatedBatchInput = z.infer<typeof onchainMarketCreatedBatchSchema>;
 
 export const agentMarketsQuerySchema = z.object({
   count: z.coerce.number().int().min(1).max(50).optional(),
