@@ -84,7 +84,7 @@ function makeConfig() {
       if (!s) return [];
       return s.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
     },
-    /** Agent market creation: max markets per cron/job (default 10). */
+    /** Agent market creation: markets per agent per job (default 10). Each agent (Gemini, XAI, Open WebUI) generates this many; total = agents * this value, capped by service max (e.g. 50). */
     get agentMarketsPerJob(): number {
       return Math.max(1, Math.min(50, Number(optionalEnv("AGENT_MARKETS_PER_JOB", "10"))));
     },
@@ -232,7 +232,7 @@ function makeConfig() {
     get creMarketCronBroadcast(): boolean {
       return process.env.CRE_MARKET_CRON_BROADCAST === "true" || process.env.CRE_MARKET_CRON_BROADCAST === "1";
     },
-    /** If true (default), cron generates markets and sends them in the request body so CRE can create up to agentMarketsPerJob in one run with one batch callback. If false, CRE fetches via GET (cap 4 per run). */
+    /** If true (default), cron generates markets (agents * agentMarketsPerJob) and sends them in the request body so CRE batches all on-chain in one run with one batch callback. If false, CRE fetches via GET (cap 4 per run). */
     get creMarketCronBatchPayload(): boolean {
       return process.env.CRE_MARKET_CRON_BATCH_PAYLOAD !== "false" && process.env.CRE_MARKET_CRON_BATCH_PAYLOAD !== "0";
     },

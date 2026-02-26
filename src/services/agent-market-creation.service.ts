@@ -297,10 +297,12 @@ function toCrePayload(
   };
 }
 
+/** Max markets per run sent to CRE; must not exceed CRE batch cap (e.g. 50). */
+const MAX_MARKETS_PER_RUN = 50;
+
 /**
- * Generates agent market payloads from Gemini, Grok, and Open WebUI (when configured).
- * Count is per-source: e.g. count=5 with Gemini + XAI + Open WebUI => 5+5+5 = 15 total markets.
- * Total is capped by agentMarketsPerJob.
+ * Generates agent market payloads from Gemini, Grok (XAI), and Open WebUI (when configured).
+ * Count is per-agent: e.g. count=4 with 3 agents => 4+4+4 = 12 total markets in one batch to CRE.
  */
 export async function generateAgentMarkets(
   count: number
@@ -308,15 +310,14 @@ export async function generateAgentMarkets(
   if (count < 1) return [];
 
   const useOpenWebUi = Boolean(config.openWebUiBaseUrl);
-  const parts = useOpenWebUi ? 3 : 2;
-  const maxTotal = config.agentMarketsPerJob;
-  const perSourceCount = Math.max(
-    1,
-    Math.min(count, Math.floor(maxTotal / parts))
+  const agents = useOpenWebUi ? 3 : 2;
+  const perAgentCount = Math.min(
+    count,
+    Math.max(1, Math.floor(MAX_MARKETS_PER_RUN / agents))
   );
-  const geminiCount = perSourceCount;
-  const grokCount = perSourceCount;
-  const openWebUiCount = useOpenWebUi ? perSourceCount : 0;
+  const geminiCount = perAgentCount;
+  const grokCount = perAgentCount;
+  const openWebUiCount = useOpenWebUi ? perAgentCount : 0;
 
   const safeCallGemini = (): Promise<AgentMarketSuggestion[]> =>
     callGemini(geminiCount).catch((err: unknown) => {
@@ -353,11 +354,9 @@ export async function generateAgentMarkets(
     openWebUiCount
   );
 
-  const out: CreCreateMarketPayload[] = [
+  return [
     ...geminiFiltered.map((s) => toCrePayload(s, "gemini")),
     ...grokFiltered.map((s) => toCrePayload(s, "grok")),
     ...openWebUiFiltered.map((s) => toCrePayload(s, "openwebui")),
   ];
-
-  return out.slice(0, maxTotal);
 }

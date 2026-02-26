@@ -39,6 +39,8 @@ export interface CreCreateMarketPayload {
 export interface OnchainMarketCreatedBody {
   questionId: string;
   createMarketTxHash: string;
+  /** When liquidity was seeded for this market, the seed transaction hash. */
+  seedTxHash?: string;
   question: string;
   oracle: string;
   creatorAddress: string;

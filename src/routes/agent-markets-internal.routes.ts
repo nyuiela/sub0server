@@ -132,10 +132,11 @@ export async function registerAgentMarketsInternalRoutes(
         });
       }
       try {
-        const { market, createMarketTxHash } = await createMarketFromOnchainResult(
-          parsed.data as OnchainMarketCreatedInput
-        );
-        return reply.code(201).send({ ...market, createMarketTxHash });
+        const body = parsed.data as OnchainMarketCreatedInput;
+        const { market, createMarketTxHash } = await createMarketFromOnchainResult(body);
+        const payload: Record<string, unknown> = { ...market, createMarketTxHash };
+        if (body.seedTxHash) payload.seedTxHash = body.seedTxHash;
+        return reply.code(201).send(payload);
       } catch (err) {
         throw err;
       }
@@ -154,16 +155,22 @@ export async function registerAgentMarketsInternalRoutes(
         });
       }
       const batch = parsed.data as OnchainMarketCreatedBatchInput;
-      const results: { questionId: string; createMarketTxHash: string; market?: unknown; error?: string }[] = [];
+      const results: { questionId: string; createMarketTxHash: string; seedTxHash?: string; market?: unknown; error?: string }[] = [];
       for (const body of batch.markets) {
         try {
           const { market, createMarketTxHash } = await createMarketFromOnchainResult(body);
-          results.push({ questionId: body.questionId, createMarketTxHash, market });
+          results.push({
+            questionId: body.questionId,
+            createMarketTxHash,
+            ...(body.seedTxHash ? { seedTxHash: body.seedTxHash } : {}),
+            market,
+          });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           results.push({
             questionId: body.questionId,
             createMarketTxHash: body.createMarketTxHash,
+            ...(body.seedTxHash ? { seedTxHash: body.seedTxHash } : {}),
             error: msg,
           });
         }
@@ -202,10 +209,11 @@ export async function registerAgentMarketsInternalRoutes(
         });
       }
       try {
-        const { market, createMarketTxHash } = await createMarketFromOnchainResult(
-          parsed.data as OnchainMarketCreatedInput
-        );
-        return reply.code(201).send({ ...market, createMarketTxHash });
+        const body = parsed.data as OnchainMarketCreatedInput;
+        const { market, createMarketTxHash } = await createMarketFromOnchainResult(body);
+        const payload: Record<string, unknown> = { ...market, createMarketTxHash };
+        if (body.seedTxHash) payload.seedTxHash = body.seedTxHash;
+        return reply.code(201).send(payload);
       } catch (err) {
         throw err;
       }
@@ -223,14 +231,24 @@ export async function registerAgentMarketsInternalRoutes(
         });
       }
       const batch = parsed.data as OnchainMarketCreatedBatchInput;
-      const results: { questionId: string; createMarketTxHash: string; market?: unknown; error?: string }[] = [];
+      const results: { questionId: string; createMarketTxHash: string; seedTxHash?: string; market?: unknown; error?: string }[] = [];
       for (const body of batch.markets) {
         try {
           const { market, createMarketTxHash } = await createMarketFromOnchainResult(body);
-          results.push({ questionId: body.questionId, createMarketTxHash, market });
+          results.push({
+            questionId: body.questionId,
+            createMarketTxHash,
+            ...(body.seedTxHash ? { seedTxHash: body.seedTxHash } : {}),
+            market,
+          });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          results.push({ questionId: body.questionId, createMarketTxHash: body.createMarketTxHash, error: msg });
+          results.push({
+            questionId: body.questionId,
+            createMarketTxHash: body.createMarketTxHash,
+            ...(body.seedTxHash ? { seedTxHash: body.seedTxHash } : {}),
+            error: msg,
+          });
         }
       }
       return reply.code(200).send({ created: results.filter((r) => !r.error).length, failed: results.filter((r) => r.error).length, results });

@@ -213,8 +213,8 @@ describe("agent-market-creation.service", () => {
       );
     });
 
-    it("respects count cap", async () => {
-      const many = Array.from({ length: 15 }, (_, i) => ({
+    it("requests count per agent so total can be agents * count (2 agents => up to 2*perAgent)", async () => {
+      const four = Array.from({ length: 4 }, (_, i) => ({
         question: `Will event ${i} happen by ${CURRENT_YEAR}?`,
         durationSeconds: 86400,
       }));
@@ -228,7 +228,7 @@ describe("agent-market-creation.service", () => {
                 candidates: [
                   {
                     content: {
-                      parts: [{ text: JSON.stringify(many) }],
+                      parts: [{ text: JSON.stringify(four) }],
                     },
                   },
                 ],
@@ -240,7 +240,11 @@ describe("agent-market-creation.service", () => {
             ok: true,
             json: () =>
               Promise.resolve({
-                choices: [{ message: { content: "[]" } }],
+                choices: [
+                  {
+                    message: { content: JSON.stringify(four) },
+                  },
+                ],
               }),
           });
         }
@@ -248,12 +252,16 @@ describe("agent-market-creation.service", () => {
       };
       vi.stubGlobal("fetch", vi.fn(mockFetch));
 
-      vi.stubEnv("AGENT_MARKETS_PER_JOB", "5");
+      vi.stubEnv("GROK_API_KEY", "grok-key");
       const { generateAgentMarkets } = await import(
         "../../src/services/agent-market-creation.service.js"
       );
-      const result = await generateAgentMarkets(10);
-      expect(result.length).toBeLessThanOrEqual(5);
+      const result = await generateAgentMarkets(4);
+      expect(result.length).toBe(8);
+      const geminiCount = result.filter((p) => p.agentSource === "gemini").length;
+      const grokCount = result.filter((p) => p.agentSource === "grok").length;
+      expect(geminiCount).toBe(4);
+      expect(grokCount).toBe(4);
     });
   });
 });
