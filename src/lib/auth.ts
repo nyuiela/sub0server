@@ -1,9 +1,11 @@
+import { createHash } from "crypto";
 import { createAuth } from "thirdweb/auth";
 import { createThirdwebClient } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import type { FastifyRequest } from "fastify";
 import { config } from "../config/index.js";
 import { getPrismaClient } from "./prisma.js";
+import { getAgentRegistrationModel } from "./agent-registration-db.js";
 
 let authInstance: ReturnType<typeof createAuth> | null = null;
 
@@ -50,6 +52,15 @@ export function getApiKeyFromRequest(req: FastifyRequest): string | null {
   return null;
 }
 
+/** Token that might be internal API key or SDK agent api_key (Bearer or x-api-key). */
+export function getBearerOrApiKeyToken(req: FastifyRequest): string | null {
+  const auth = req.headers["authorization"];
+  if (typeof auth === "string" && auth.toLowerCase().startsWith("bearer ")) {
+    return auth.slice(7).trim();
+  }
+  return getApiKeyFromRequest(req);
+}
+
 export async function verifyThirdwebJwt(jwt: string): Promise<{ address: string } | null> {
   const auth = getThirdwebAuth();
   if (!auth) return null;
@@ -88,7 +99,34 @@ export async function resolveRequestAuth(req: FastifyRequest): Promise<import(".
     }
   }
 
+  const agentToken = getBearerOrApiKeyToken(req);
+  if (agentToken !== null && agentToken.length > 0) {
+    const auth = await resolveAgentApiKey(agentToken);
+    if (auth != null) return auth;
+  }
+
   return null;
+}
+
+async function resolveAgentApiKey(rawToken: string): Promise<import("../types/auth.js").AuthAgent | null> {
+  const hash = hashAgentApiKey(rawToken);
+  const agentReg = getAgentRegistrationModel();
+  const reg = await agentReg.findFirst({
+    where: { apiKeyHash: hash },
+    select: { id: true, claimedAgentId: true, claimedByUserId: true, walletAddress: true },
+  });
+  if (!reg) return null;
+  return {
+    type: "agent",
+    registrationId: reg.id as string,
+    claimedAgentId: (reg.claimedAgentId as string | null) ?? null,
+    claimedUserId: (reg.claimedByUserId as string | null) ?? null,
+    walletAddress: reg.walletAddress as string,
+  };
+}
+
+export function hashAgentApiKey(apiKey: string): string {
+  return createHash("sha256").update(apiKey, "utf8").digest("hex");
 }
 
 export function requireUser(req: FastifyRequest): import("../types/auth.js").AuthUser | null {
@@ -99,4 +137,10 @@ export function requireUser(req: FastifyRequest): import("../types/auth.js").Aut
 
 export function requireApiKey(req: FastifyRequest): boolean {
   return req.auth?.type === "apiKey";
+}
+
+export function requireAgent(req: FastifyRequest): import("../types/auth.js").AuthAgent | null {
+  const auth = req.auth;
+  if (auth?.type === "agent") return auth;
+  return null;
 }

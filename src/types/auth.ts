@@ -8,4 +8,13 @@ export type AuthApiKey = {
   type: "apiKey";
 };
 
-export type RequestAuth = AuthUser | AuthApiKey | null;
+/** BYOA: agent authenticated via SDK api_key (Bearer or x-api-key). */
+export type AuthAgent = {
+  type: "agent";
+  registrationId: string;
+  claimedAgentId: string | null;
+  claimedUserId: string | null;
+  walletAddress: string;
+};
+
+export type RequestAuth = AuthUser | AuthApiKey | AuthAgent | null;

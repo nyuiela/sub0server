@@ -19,7 +19,10 @@
     "live-test": "tsx src/scripts/live-test.ts",
     "ws-test": "tsx src/scripts/ws-test.ts",
     "stake-verify": "tsx src/scripts/stake-verify-live.ts",
-    "news-ingest": "tsx src/workers/news-ingest.worker.ts"
+    "news-ingest": "tsx src/workers/news-ingest.worker.ts",
+    "agent-markets": "tsx src/scripts/run-agent-market-creation.ts",
+    "agent-markets:dry": "tsx src/scripts/run-agent-market-creation.ts --dry-run",
+    "agent-markets:generate": "tsx src/scripts/generate-agent-markets-only.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

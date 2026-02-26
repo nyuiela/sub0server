@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
 import { requireAgentOwnerOrApiKey, requireUserOrApiKey } from "../lib/permissions.js";
 import { requireUser, requireApiKey } from "../lib/auth.js";
+import { config } from "../config/index.js";
 import {
   agentCreateSchema,
   agentUpdateSchema,
@@ -63,6 +64,7 @@ function serializeAgent(agent: {
   name: string;
   persona: string;
   publicKey: string;
+  walletAddress?: string | null;
   balance: { toString(): string };
   tradedAmount: { toString(): string };
   totalTrades: number;
@@ -81,6 +83,7 @@ function serializeAgent(agent: {
   const { encryptedPrivateKey: _skip, ...rest } = agent as typeof agent & { encryptedPrivateKey?: string };
   return {
     ...rest,
+    walletAddress: agent.walletAddress ?? null,
     balance: agent.balance.toString(),
     tradedAmount: agent.tradedAmount.toString(),
     pnl: agent.pnl.toString(),
@@ -129,7 +132,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       data: agents.map((a) => ({
         ...serializeAgent(a),
-        owner: a.owner,
+        owner: (a as { owner?: { address?: string } }).owner?.address ?? "",
         strategy: a.strategy,
         template: a.template,
         enqueuedMarketIds: a.enqueuedMarkets.map((m) => m.marketId),
@@ -203,7 +206,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     const payload = {
       ...serializeAgent(agent),
       modelSettings,
-      owner: agent.owner,
+      owner: (agent as { owner?: { address?: string } }).owner?.address ?? "",
       strategy: agent.strategy,
       template: agent.template,
       enqueuedMarketIds: agent.enqueuedMarkets.map((m) => m.marketId),
@@ -273,7 +276,78 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({
       ...serializeAgent(agent),
       modelSettings,
-      owner: agent.owner,
+      owner: (agent as { owner?: { address?: string } }).owner?.address ?? "",
+      strategy: agent.strategy,
+      template: agent.template,
+    });
+  });
+
+  /** Create agent wallet via CRE (createAgentKey). CRE generates the key and stores it in confidential compute;
+   * we only store the returned address. The agent uses CRE (e.g. quote/order) when it needs to sign transactions. */
+  app.post("/api/agents/:id/create-wallet", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+    const agentId = req.params.id;
+    const prisma = getPrismaClient();
+    const existing = await prisma.agent.findUnique({
+      where: { id: agentId },
+      select: { id: true, walletAddress: true, owner: { select: { id: true, address: true } }, strategy: true, template: { select: { id: true, name: true } }, openclaw: true, modelSettings: true, balance: true, tradedAmount: true, totalTrades: true, pnl: true, status: true, currentExposure: true, maxDrawdown: true, winRate: true, totalLlmTokens: true, totalLlmCost: true, ownerId: true, name: true, persona: true, publicKey: true, templateId: true, createdAt: true, updatedAt: true },
+    });
+    if (!existing) return reply.code(404).send({ error: "Agent not found" });
+    if (existing.walletAddress != null && String(existing.walletAddress).trim() !== "") {
+      const modelSettings = modelSettingsWithOpenclaw(existing.modelSettings, existing.openclaw);
+      return reply.send({
+        ...serializeAgent(existing),
+        modelSettings,
+        owner: (existing as { owner?: { address?: string } }).owner?.address ?? "",
+        strategy: existing.strategy,
+        template: existing.template,
+      });
+    }
+    const creUrl = config.creHttpUrl;
+    if (!creUrl) {
+      return reply.code(503).send({ error: "Agent wallet creation is not configured (CRE_HTTP_URL)" });
+    }
+    const body: Record<string, unknown> = { action: "createAgentKey", agentId };
+    if (config.creHttpApiKey) body.apiKey = config.creHttpApiKey;
+    let res: Response;
+    try {
+      res = await fetch(creUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      return reply.code(502).send({ error: "CRE request failed", detail: err instanceof Error ? err.message : "Unknown error" });
+    }
+    const text = await res.text();
+    if (!res.ok) {
+      return reply.code(502).send({ error: "CRE returned error", detail: text || String(res.status) });
+    }
+    let data: { address?: string };
+    try {
+      data = JSON.parse(text) as { address?: string };
+    } catch {
+      return reply.code(502).send({ error: "CRE response invalid", detail: text });
+    }
+    const address = typeof data.address === "string" ? data.address.trim() : "";
+    if (!address || !address.startsWith("0x")) {
+      return reply.code(502).send({ error: "CRE did not return a valid address", detail: text });
+    }
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: { walletAddress: address },
+      include: {
+        owner: { select: { id: true, address: true } },
+        strategy: true,
+        template: { select: { id: true, name: true } },
+        openclaw: true,
+      },
+    });
+    const modelSettings = modelSettingsWithOpenclaw(agent.modelSettings, agent.openclaw);
+    return reply.send({
+      ...serializeAgent(agent),
+      modelSettings,
+      owner: (agent as { owner?: { address?: string } }).owner?.address ?? "",
       strategy: agent.strategy,
       template: agent.template,
     });
@@ -376,7 +450,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       },
       include: { owner: { select: { id: true, address: true } } },
     });
-    return reply.code(201).send({ ...serializeAgent(agent), owner: agent.owner });
+    return reply.code(201).send({ ...serializeAgent(agent), owner: (agent as { owner?: { address?: string } }).owner?.address ?? "" });
   });
 
   app.delete("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

@@ -14,6 +14,7 @@ import { registerAgentEnqueueRoutes } from "./routes/agent-enqueue.routes.js";
 import { registerUserRoutes } from "./routes/users.routes.js";
 import { registerAgentRoutes } from "./routes/agents.routes.js";
 import { registerMarketRoutes } from "./routes/markets.routes.js";
+import { registerAgentMarketsInternalRoutes } from "./routes/agent-markets-internal.routes.js";
 import { registerPositionRoutes } from "./routes/positions.routes.js";
 import { registerStrategyRoutes } from "./routes/strategies.routes.js";
 import { registerToolRoutes } from "./routes/tools.routes.js";
@@ -23,7 +24,11 @@ import { registerRegisterRoutes } from "./routes/register.routes.js";
 import { registerFeedRoutes } from "./routes/feed.routes.js";
 import { registerSettingsRoutes } from "./routes/settings.routes.js";
 import { registerAuthRoutes } from "./routes/auth.routes.js";
+import { registerSdkAgentRoutes } from "./routes/sdk-agent.routes.js";
+import { registerSdkApiRoutes } from "./routes/sdk-api.routes.js";
+import { registerSettlementInternalRoutes } from "./routes/settlement-internal.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
+import { startCreMarketCron, stopCreMarketCron } from "./services/cre-market-cron.js";
 import type { Worker } from "bullmq";
 import type { TradesJobPayload } from "./workers/trades-queue.js";
 import type { WebSocket } from "ws";
@@ -40,6 +45,18 @@ await fastify.register(fastifyCors, {
 });
 fastify.register(fastifyWebsocket, {
   options: { maxPayload: 65536 },
+});
+
+fastify.addHook("onRequest", async (request) => {
+  if (
+    request.method === "POST" &&
+    request.url.split("?")[0] === "/api/cre/markets/onchain-created"
+  ) {
+    const ct = request.headers["content-type"];
+    if (!ct || String(ct).toLowerCase() === "undefined") {
+      request.headers["content-type"] = "application/json";
+    }
+  }
 });
 
 fastify.addHook("preValidation", async (request) => {
@@ -149,9 +166,13 @@ fastify.get("/health", async () => ({ status: "ok" }));
 fastify.decorate("prisma", getPrismaClient());
 await registerAgentEnqueueRoutes(fastify);
 await registerAuthRoutes(fastify);
+await registerSdkAgentRoutes(fastify);
+await registerSdkApiRoutes(fastify);
+await registerSettlementInternalRoutes(fastify);
 await registerUserRoutes(fastify);
 await registerAgentRoutes(fastify);
 await registerMarketRoutes(fastify);
+await registerAgentMarketsInternalRoutes(fastify);
 await registerPositionRoutes(fastify);
 await registerStrategyRoutes(fastify);
 await registerToolRoutes(fastify);
@@ -167,6 +188,7 @@ const start = async () => {
     await manager.start();
     await fastify.listen({ port: config.port, host: "0.0.0.0" });
     tradesWorker = await startTradesPersistenceWorker();
+    startCreMarketCron(fastify.log);
     fastify.log.info("Server, WebSocket manager and trades persistence worker started");
   } catch (err) {
     fastify.log.error(err);
@@ -175,6 +197,7 @@ const start = async () => {
 };
 
 const shutdown = async () => {
+  stopCreMarketCron();
   if (tradesWorker) {
     await tradesWorker.close();
     tradesWorker = null;

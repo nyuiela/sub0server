@@ -63,6 +63,7 @@ model User {
   positions  Position[]
   aiRequests AiRequest[]
   vault      UserVault?
+  agentRegistrationsClaimed AgentRegistration[]
 
   @@index([username])
 }
@@ -85,6 +86,8 @@ model Agent {
   name                String
   persona             String    @db.Text
   publicKey           String
+  /** CRE-generated deposit/trading wallet; null until create-wallet (CRE createAgentKey) has been run. */
+  walletAddress       String?
   encryptedPrivateKey  String
   strategy            AgentStrategy?
   modelSettings       Json
@@ -113,6 +116,7 @@ model Agent {
   tracks      AgentTrack[]
   reasoningLogs AgentReasoning[]
   enqueuedMarkets AgentEnqueuedMarket[]
+  registrationClaimed AgentRegistration?
 
   @@index([ownerId])
   @@index([status])
@@ -210,6 +214,10 @@ model Market {
   collateralToken     String
   conditionId         String          @unique
   platform            MarketPlatform  @default(NATIVE)
+  /** Which AI agent created this market (e.g. gemini, grok). Internal only; not exposed on public API. */
+  agentSource         String?        // gemini | grok
+  /** Optional rules for agent settlement (benchmark for deliberation). Offchain only. */
+  settlementRules     String?        @db.Text
   liquidity           Decimal?        @db.Decimal(28, 8)
   confidence          Float?
   pnl                 Decimal?       @db.Decimal(28, 8)
@@ -223,11 +231,29 @@ model Market {
   aiLogs    AiLog[]
   agentReasons AgentReasoning[]
   agentEnqueuedMarkets AgentEnqueuedMarket[]
+  settlementLogs      MarketSettlementLog[]
 
   @@index([creatorAddress])
   @@index([status])
   @@index([conditionId])
   @@index([platform])
+}
+
+/// Log of agent settlement deliberation (e.g. dispute reasons when consensus is false).
+model MarketSettlementLog {
+  id           String   @id @default(uuid())
+  marketId     String
+  questionId   String   // onchain questionId (hex)
+  consensus    Boolean
+  outcomeArray Json?    // [1,0] etc when resolved
+  agentAReason String?  @db.Text
+  agentBReason String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+  @@index([questionId])
 }
 
 model Position {
@@ -391,6 +417,28 @@ model Activity {
   agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
   @@index([agentId])
+}
+
+/// BYOA: unclaimed agent registration. After claim, links to User and Agent.
+model AgentRegistration {
+  id                  String    @id @default(uuid())
+  apiKeyHash          String    // SHA-256 of raw api_key
+  claimCode           String    @unique // short code for claim URL
+  name                String?   // optional display name
+  status              String    @default("UNCLAIMED") // UNCLAIMED | CLAIMED
+  claimedByUserId     String?
+  claimedAgentId      String?   @unique
+  walletAddress       String    // agent trading wallet (0x...)
+  encryptedPrivateKey String    // backend-generated, for signing
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  claimedByUser User?  @relation(fields: [claimedByUserId], references: [id], onDelete: SetNull)
+  claimedAgent Agent? @relation(fields: [claimedAgentId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyHash])
+  @@index([claimCode])
+  @@index([status])
 }
 
 model Tool {

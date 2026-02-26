@@ -84,6 +84,79 @@ function makeConfig() {
       if (!s) return [];
       return s.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean);
     },
+    /** Agent market creation: max markets per cron/job (default 10). */
+    get agentMarketsPerJob(): number {
+      return Math.max(1, Math.min(50, Number(optionalEnv("AGENT_MARKETS_PER_JOB", "10"))));
+    },
+    /** Gemini API key for AI-generated market questions. Optional; if unset, agent-markets endpoint returns empty or errors. */
+    get geminiApiKey(): string | undefined {
+      return process.env.GEMINI_API_KEY ?? undefined;
+    },
+    /** Platform oracle address for agent-created markets (Sub0 oracle). */
+    get platformOracleAddress(): string {
+      return optionalEnv("PLATFORM_ORACLE_ADDRESS", "0x0000000000000000000000000000000000000000");
+    },
+    /** Platform creator address for agent-created markets (CRE signer / Sub0 owner). */
+    get platformCreatorAddress(): string {
+      return optionalEnv("PLATFORM_CREATOR_ADDRESS", "0x0000000000000000000000000000000000000000");
+    },
+    /** Default collateral token address for agent-created markets (e.g. USDC). */
+    get defaultCollateralToken(): string {
+      return optionalEnv("DEFAULT_COLLATERAL_TOKEN", "0x0000000000000000000000000000000000000000");
+    },
+    /** Gemini model for market generation (e.g. gemini-2.0-flash). */
+    get geminiModel(): string {
+      return optionalEnv("GEMINI_MODEL", "gemini-2.0-flash");
+    },
+    /** XAI API key (Grok is XAI; one key for both). Optional; if unset, only Gemini is used. */
+    get grokApiKey(): string | undefined {
+      return process.env.XAI_API_KEY ?? process.env.GROK_API_KEY ?? undefined;
+    },
+    /** Grok/XAI model name (e.g. grok-2-mini, grok-3-mini). XAI_MODEL or GROK_MODEL. */
+    get grokModel(): string {
+      return optionalEnv("XAI_MODEL", optionalEnv("GROK_MODEL", "grok-3-mini"));
+    },
+    /** Base URL for claim links (e.g. https://app.sub0.xyz). Used in BYOA registration response. */
+    get frontendBaseUrl(): string {
+      return optionalEnv("FRONTEND_URL", optionalEnv("AUTH_DOMAIN", "http://localhost:3000"));
+    },
+    /** Chain ID for SDK quote signing (e.g. 84532 Base Sepolia). When set with predictionVaultAddress, agent quote signing is enabled. */
+    get sdkQuoteChainId(): number | undefined {
+      const v = process.env.SDK_QUOTE_CHAIN_ID;
+      return v !== undefined && v !== "" ? Number(v) : undefined;
+    },
+    /** PredictionVault address for EIP-712 quote signing. */
+    get predictionVaultAddress(): string | undefined {
+      return process.env.PREDICTION_VAULT_ADDRESS ?? undefined;
+    },
+    /** EIP-712 domain name for PredictionVault (e.g. Sub0PredictionVault). */
+    get eip712DomainName(): string {
+      return optionalEnv("EIP712_DOMAIN_NAME", "Sub0PredictionVault");
+    },
+    /** EIP-712 domain version (e.g. 1). */
+    get eip712DomainVersion(): string {
+      return optionalEnv("EIP712_DOMAIN_VERSION", "1");
+    },
+    /** CRE HTTP endpoint for triggering workflows (e.g. createAgentKey). When set, POST /api/agents/:id/create-wallet is enabled. */
+    get creHttpUrl(): string | undefined {
+      return process.env.CRE_HTTP_URL?.trim() || undefined;
+    },
+    /** API key sent to CRE HTTP trigger (body.apiKey). Must match CRE secret HTTP_API_KEY when set. */
+    get creHttpApiKey(): string | undefined {
+      return process.env.CRE_HTTP_API_KEY?.trim() || undefined;
+    },
+    /** If true, backend will POST createMarketsFromBackend to CRE on an interval (requires creHttpUrl). */
+    get creMarketCronEnabled(): boolean {
+      return process.env.CRE_MARKET_CRON_ENABLED === "true" || process.env.CRE_MARKET_CRON_ENABLED === "1";
+    },
+    /** Interval in ms for createMarketsFromBackend job (default 1 hour). */
+    get creMarketCronIntervalMs(): number {
+      return Math.max(60_000, Number(process.env.CRE_MARKET_CRON_INTERVAL_MS) || 3600_000);
+    },
+    /** If true, cron sends broadcast: true to CRE so simulate runs with --broadcast (real onchain txs). Set in sub0server .env (CRE_MARKET_CRON_BROADCAST=true). Default false = dry run, no tx hash. */
+    get creMarketCronBroadcast(): boolean {
+      return process.env.CRE_MARKET_CRON_BROADCAST === "true" || process.env.CRE_MARKET_CRON_BROADCAST === "1";
+    },
   };
 }
 

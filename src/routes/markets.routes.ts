@@ -51,9 +51,11 @@ function serializeMarket(market: {
   pnl?: { toString(): string } | null;
   createdAt: Date;
   updatedAt: Date;
+  agentSource?: string | null;
 }) {
+  const { agentSource: _omit, ...rest } = market;
   return {
-    ...market,
+    ...rest,
     volume: market.volume.toString(),
     resolutionDate: market.resolutionDate.toISOString(),
     liquidity: market.liquidity?.toString() ?? null,
