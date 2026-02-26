@@ -6,7 +6,7 @@ import { Worker, type Job } from "bullmq";
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { runTradingAnalysis } from "../services/agent-trading-analysis.service.js";
-import { CRE_PENDING_PUBLIC_KEY } from "../schemas/agent.schema.js";
+import { CRE_PENDING_PUBLIC_KEY, CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
 
 const QUEUE_NAME = "agent-prediction";
 
@@ -46,12 +46,15 @@ async function submitOrderFromWorker(payload: {
   return { ok: res.ok, status: res.status, body };
 }
 
-function agentHasWallet(walletAddress: string | null, publicKey: string): boolean {
-  const addr = walletAddress?.trim();
-  const pk = publicKey?.trim();
-  return Boolean(
-    (addr && addr !== CRE_PENDING_PUBLIC_KEY) || (pk && pk !== CRE_PENDING_PUBLIC_KEY)
-  );
+function agentHasCompleteWallet(
+  walletAddress: string | null,
+  publicKey: string,
+  encryptedPrivateKey: string | null
+): boolean {
+  const addr = walletAddress?.trim() || publicKey?.trim();
+  if (!addr || addr === CRE_PENDING_PUBLIC_KEY) return false;
+  const key = encryptedPrivateKey?.trim();
+  return Boolean(key && key !== CRE_PENDING_PRIVATE_KEY);
 }
 
 async function createPendingTrade(
@@ -97,6 +100,8 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
         walletAddress: true,
         publicKey: true,
         balance: true,
+        modelSettings: true,
+        encryptedPrivateKey: true,
       },
     }),
     prisma.market.findUnique({
@@ -126,11 +131,13 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     return;
   }
 
+  const modelSettings = agent.modelSettings as { model?: string } | null;
   const decision = await runTradingAnalysis({
     marketName: market.name,
     outcomes,
     agentName: agent.name,
     personaSummary: agent.persona?.slice(0, 500),
+    model: modelSettings?.model,
   });
 
   if (decision.action === "skip") {
@@ -142,7 +149,11 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
   const quantity = decision.quantity ?? "1";
   const side = decision.action === "buy" ? "BID" : "ASK";
 
-  const hasWallet = agentHasWallet(agent.walletAddress, agent.publicKey);
+  const hasWallet = agentHasCompleteWallet(
+    agent.walletAddress,
+    agent.publicKey,
+    agent.encryptedPrivateKey
+  );
   if (!hasWallet) {
     await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "NO_WALLET");
     return;

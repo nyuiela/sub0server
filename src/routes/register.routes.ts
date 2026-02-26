@@ -66,6 +66,7 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
         name: t.name.trim(),
         persona: (t.persona ?? t.name).trim(),
         publicKey: keys.publicKey,
+        walletAddress: keys.publicKey,
         encryptedPrivateKey: keys.encryptedPrivateKey,
         modelSettings: (t.modelSettings ?? {}) as Prisma.InputJsonValue,
         template: { connect: { id: t.templateId } },
@@ -76,6 +77,7 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
         name: c.name.trim(),
         persona: (c.persona ?? c.name).trim(),
         publicKey: keys.publicKey,
+        walletAddress: keys.publicKey,
         encryptedPrivateKey: keys.encryptedPrivateKey,
         modelSettings: (c.modelSettings ?? {}) as Prisma.InputJsonValue,
       };

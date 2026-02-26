@@ -54,10 +54,10 @@ async function createMarketFromOnchainResult(
     where: { conditionId: body.questionId },
   });
   if (existing) {
-    throw Object.assign(new Error("Market with this conditionId already exists"), {
-      code: "CONFLICT" as const,
-      marketId: existing.id,
-    });
+    return {
+      market: serializeMarket(existing),
+      createMarketTxHash: body.createMarketTxHash,
+    };
   }
   const resolutionDate = new Date(Date.now() + body.duration * 1000);
   const outcomes =
@@ -137,12 +137,6 @@ export async function registerAgentMarketsInternalRoutes(
         );
         return reply.code(201).send({ ...market, createMarketTxHash });
       } catch (err) {
-        if (err && typeof err === "object" && (err as { code?: string }).code === "CONFLICT") {
-          return reply.code(409).send({
-            error: (err as Error).message,
-            marketId: (err as { marketId?: string }).marketId,
-          });
-        }
         throw err;
       }
     }
@@ -167,12 +161,10 @@ export async function registerAgentMarketsInternalRoutes(
           results.push({ questionId: body.questionId, createMarketTxHash, market });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          const conflict = err && typeof err === "object" && (err as { code?: string }).code === "CONFLICT";
           results.push({
             questionId: body.questionId,
             createMarketTxHash: body.createMarketTxHash,
             error: msg,
-            ...(conflict && { marketId: (err as { marketId?: string }).marketId }),
           });
         }
       }
@@ -215,12 +207,6 @@ export async function registerAgentMarketsInternalRoutes(
         );
         return reply.code(201).send({ ...market, createMarketTxHash });
       } catch (err) {
-        if (err && typeof err === "object" && (err as { code?: string }).code === "CONFLICT") {
-          return reply.code(409).send({
-            error: (err as Error).message,
-            marketId: (err as { marketId?: string }).marketId,
-          });
-        }
         throw err;
       }
     }

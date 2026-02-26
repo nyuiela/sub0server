@@ -128,13 +128,19 @@ function makeConfig() {
       const m = process.env.GEMINI_MODEL?.trim();
       return m ? [m] : [optionalEnv("GEMINI_MODEL", "gemini-2.0-flash")];
     },
-    /** Platform oracle address for agent-created markets (Sub0 oracle). */
+    /** Platform oracle address for agent-created markets (Sub0 oracle). Must match chain; default matches sub0cre payloads/create-market-payload.json. */
     get platformOracleAddress(): string {
-      return optionalEnv("PLATFORM_ORACLE_ADDRESS", "0x0000000000000000000000000000000000000000");
+      return (
+        process.env.PLATFORM_ORACLE_ADDRESS?.trim() ||
+        "0x787AA9f59509Db6Fb37EA37b1cBB7D0D71B116E6"
+      );
     },
-    /** Platform creator address for agent-created markets (CRE signer / Sub0 owner). */
+    /** Platform creator address for agent-created markets (CRE signer / Sub0 owner). Must match chain; default matches sub0cre payloads/create-market-payload.json. */
     get platformCreatorAddress(): string {
-      return optionalEnv("PLATFORM_CREATOR_ADDRESS", "0x0000000000000000000000000000000000000000");
+      return (
+        process.env.PLATFORM_CREATOR_ADDRESS?.trim() ||
+        "0xf0830060f836B8d54bF02049E5905F619487989e"
+      );
     },
     /** Default USDC amount for agent-created market seed (CRE createMarket payload). Matches create-market-payload.json. */
     get agentMarketAmountUsdc(): string {

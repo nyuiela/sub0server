@@ -50,10 +50,11 @@ await fastify.register(fastifyWebsocket, {
 });
 
 fastify.addHook("onRequest", async (request) => {
-  if (
-    request.method === "POST" &&
-    request.url.split("?")[0] === "/api/cre/markets/onchain-created"
-  ) {
+  const path = request.url.split("?")[0];
+  const isCreOnchainCreated =
+    path === "/api/cre/markets/onchain-created" ||
+    path === "/api/cre/markets/onchain-created-batch";
+  if (request.method === "POST" && isCreOnchainCreated) {
     const ct = request.headers["content-type"];
     if (!ct || String(ct).toLowerCase() === "undefined") {
       request.headers["content-type"] = "application/json";
