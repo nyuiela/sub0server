@@ -36,6 +36,7 @@ function makeConfig() {
     get challengeTtlSeconds(): number {
       return Number(optionalEnv("CHALLENGE_TTL_SECONDS", "300"));
     },
+    /** Domain used for Thirdweb JWT verification. Must match the frontend origin where the user signs in (e.g. localhost:3002 if app runs there). */
     get authDomain(): string {
       return optionalEnv("AUTH_DOMAIN", "localhost:3000");
     },
