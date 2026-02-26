@@ -31,12 +31,30 @@ function getThirdwebAuth(): ReturnType<typeof createAuth> | null {
 
 const AUTH_HEADER = "authorization";
 
+/** Parse Cookie header for a given name (fallback when req.cookies not populated). */
+function getCookieFromHeader(cookieHeader: string | undefined, name: string): string | null {
+  if (typeof cookieHeader !== "string") return null;
+  const regex = new RegExp(`(?:^|;\\s*)${name}=([^;]*)`);
+  const match = regex.exec(cookieHeader);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1].trim());
+  } catch {
+    return match[1].trim();
+  }
+}
+
 export function getJwtFromRequest(req: FastifyRequest): string | null {
   const cookieName = config.authCookieName;
   const cookie = req.cookies?.[cookieName];
   if (cookie && typeof cookie === "string") return cookie;
   const legacyCookie = req.cookies?.["jwt"];
   if (legacyCookie && typeof legacyCookie === "string") return legacyCookie;
+  const cookieHeader = req.headers["cookie"];
+  const fromHeader = getCookieFromHeader(cookieHeader, cookieName);
+  if (fromHeader) return fromHeader;
+  const legacy = getCookieFromHeader(cookieHeader, "jwt");
+  if (legacy) return legacy;
   const auth = req.headers[AUTH_HEADER];
   if (typeof auth === "string" && auth.toLowerCase().startsWith("bearer ")) {
     return auth.slice(7).trim();

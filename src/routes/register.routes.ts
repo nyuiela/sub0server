@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
-import { requireUser } from "../lib/auth.js";
+import { requireUser, getJwtFromRequest } from "../lib/auth.js";
 import { generateAgentKeys } from "../services/agent-keys.service.js";
 import {
   usernameCheckSchema,
@@ -30,7 +30,11 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
   app.post("/api/register", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
     const userAuth = requireUser(req);
     if (!userAuth) {
-      return reply.code(401).send({ error: "Authentication required. Sign in with your wallet (Thirdweb)." });
+      const hadJwt = getJwtFromRequest(req) !== null;
+      const message = hadJwt
+        ? "Session invalid or expired. Ensure backend AUTH_DOMAIN matches your app origin (e.g. localhost:3002) and send the JWT in Authorization: Bearer header for cross-origin requests. Sign in again."
+        : "Authentication required. Sign in with your wallet (Thirdweb).";
+      return reply.code(401).send({ error: message });
     }
 
     const parsed = registerBodySchema.safeParse(req.body);
