@@ -9,6 +9,7 @@ import { getPrismaClient } from "./prisma.js";
 /** Delegate for AgentRegistration; args match Prisma API. */
 export type AgentRegistrationDelegate = {
   findUnique: (args: { where: { id?: string; claimCode?: string; apiKeyHash?: string }; select?: Record<string, boolean> }) => Promise<Record<string, unknown> | null>;
+  findFirst: (args: { where: { apiKeyHash?: string }; select?: Record<string, boolean> }) => Promise<Record<string, unknown> | null>;
   create: (args: { data: Record<string, unknown>; select?: Record<string, boolean> }) => Promise<{ id: string }>;
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
 };

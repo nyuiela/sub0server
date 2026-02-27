@@ -63,11 +63,15 @@ export async function seedMarketLiquidityOnChain(
   const clients = getClients();
   if (!clients) return false;
   try {
+    const account = clients.wallet.account;
+    if (!account) return false;
     const hash = await clients.wallet.writeContract({
+      account,
       address: PREDICTION_VAULT_ADDRESS as Hex,
       abi: SEED_MARKET_LIQUIDITY_ABI,
       functionName: "seedMarketLiquidity",
       args: [questionId, amountUsdc],
+      chain: sepolia,
     });
     const receipt = await clients.public.waitForTransactionReceipt({ hash });
     return receipt.status === "success";

@@ -108,7 +108,7 @@ export async function fetchCryptoPanic(): Promise<NormalizedFeedItem[]> {
       const externalId = `CP-${r.id ?? r.url ?? title.slice(0, 80)}`;
       const publishedAt = r.created_at ? new Date(r.created_at) : new Date();
       if (Number.isNaN(publishedAt.getTime())) continue;
-      const currenciesList = r.currencies?.map((c) => c.code?.toUpperCase()).filter(Boolean) ?? [];
+      const currenciesList: string[] = r.currencies?.map((c) => c.code?.toUpperCase()).filter((x): x is string => typeof x === "string") ?? [];
       items.push({
         source: "CRYPTOPANIC",
         externalId,
