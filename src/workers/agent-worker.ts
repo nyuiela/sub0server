@@ -106,7 +106,7 @@ async function createPendingTrade(
 }
 
 async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
-  const { marketId, agentId } = job.data;
+  const { marketId, agentId, chainKey = CHAIN_KEY_MAIN } = job.data;
   console.log(`Agent job: marketId=${marketId} agentId=${agentId}`);
 
   if (!config.agentTradingEnabled) {
@@ -203,7 +203,7 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     return;
   }
 
-  const balance = new Decimal(balanceStr);
+  const balance = new Decimal(agent.balance?.toString() ?? "0");
   const qty = new Decimal(quantity);
   if (balance.lt(qty)) {
     await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_BALANCE");

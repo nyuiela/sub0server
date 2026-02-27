@@ -13,6 +13,11 @@ import {
 } from "../lib/llm-rotation.js";
 import { computeQuestionId } from "../lib/cre-question-id.js";
 import { getPrismaClient } from "../lib/prisma.js";
+import {
+  getMarketGenerationSystemPrompt,
+  getMarketGenerationUserPrompt,
+} from "../prompts/load-market-prompts.js";
+import { withQuestionUniqueSuffix } from "../lib/cre-question-unique-suffix.js";
 import type {
   AgentMarketSuggestion,
   CreCreateMarketPayload,
@@ -43,6 +48,9 @@ const MARKET_CATEGORIES = [
   "news and world events",
   "science",
   "gaming",
+  "celebrities",
+  "controversial trending topics",
+  "trending X topics and conversations",
   "business and startups",
   "culture and awards",
   "space and science",
@@ -53,39 +61,29 @@ function pickRandomCategories(n: number): string[] {
   return shuffled.slice(0, Math.min(n, shuffled.length));
 }
 
+const SYSTEM_PROMPT_VARS = {
+  currentYear: CURRENT_YEAR,
+  categoryList: MARKET_CATEGORIES.join(", "),
+  maxQuestionLength: MAX_QUESTION_LENGTH,
+  defaultDurationSeconds: DEFAULT_DURATION_SECONDS,
+  defaultOutcomeSlotCount: DEFAULT_OUTCOME_SLOT_COUNT,
+};
+
 function buildSystemPrompt(): string {
-  const categoryList = MARKET_CATEGORIES.join(", ");
-  return `You are a prediction market question generator. Your task is to output a JSON array of market questions.
+  return getMarketGenerationSystemPrompt(SYSTEM_PROMPT_VARS);
+}
 
-VARIETY (IMPORTANT):
-- Each question in your response MUST be from a DIFFERENT category. Do not generate multiple questions about the same topic area.
-- Spread questions across many categories. Use a mix of: ${categoryList}.
-- Avoid repeating the same type of market (e.g. do not output several sports or several tech questions in one response). Vary widely.
-
-STRICT RULES:
-- Use ONLY the current year (${CURRENT_YEAR}) in any date or time reference. Do not use past years.
-- Questions must be about events that are likely to occur or be verifiable in the future (e.g. "${CURRENT_YEAR} elections", "Will X happen by end of ${CURRENT_YEAR}?").
-- Each question must be a single, clear yes/no or multi-outcome prediction.
-- No historical or already-resolved events.
-- No offensive or harmful content.
-
-OUTPUT FORMAT:
-- You MUST respond with a SINGLE JSON array. Each element is an object with:
-  - "question": string (required). Clear prediction question. Max ${MAX_QUESTION_LENGTH} chars.
-  - "context": string (optional). One short sentence describing the market topic or resolution criteria. Max 256 chars.
-  - "durationSeconds": number (optional). Seconds until resolution. Default ${DEFAULT_DURATION_SECONDS}.
-  - "outcomeSlotCount": number (optional). 2 for binary. Default ${DEFAULT_OUTCOME_SLOT_COUNT}.
-- Output MUST be valid JSON only. No markdown, no code fences, no prose before or after.
-- Minified (one line) preferred. Property order: "question" first, then "context", then "durationSeconds", then "outcomeSlotCount".
-- Generate exactly the number of items requested (or up to 10 if not specified).`;
+function buildEmphasisInstruction(emphasisCategories: string[] | undefined): string {
+  if (emphasisCategories != null && emphasisCategories.length > 0) {
+    const list = emphasisCategories.join(", ");
+    return `For this batch you MUST include at least one question from each of these categories: ${list}. Spread the rest across other categories. Include at least one question focused on a non-US region (Europe, UK, Asia, Africa, Latin America, or global). For any crypto or price questions use varied price targets and timeframes.`;
+  }
+  return "Ensure each question is from a different category. Include a mix of US and global (Europe, UK, Asia, Africa, Latin America, world events). For crypto/price questions use varied price levels and dates.";
 }
 
 function buildUserPrompt(count: number, emphasisCategories?: string[]): string {
-  if (emphasisCategories != null && emphasisCategories.length > 0) {
-    const list = emphasisCategories.join(", ");
-    return `Generate exactly ${count} prediction market questions. For this batch you MUST include at least one question from each of these categories: ${list}. Spread the remaining questions across other categories (entertainment, sports, tech, music, stocks, news, etc.). Return only the JSON array.`;
-  }
-  return `Generate exactly ${count} prediction market questions. Ensure each question is from a different category (sports, tech, entertainment, movies, music, stocks, politics, viral topics, etc.). Return only the JSON array.`;
+  const emphasisInstruction = buildEmphasisInstruction(emphasisCategories);
+  return getMarketGenerationUserPrompt(count, emphasisInstruction);
 }
 
 async function callGemini(count: number): Promise<AgentMarketSuggestion[]> {
@@ -510,7 +508,7 @@ export async function getDraftMarketsForCre(
     },
   });
   const now = Date.now();
-  return drafts.map((m) => {
+  return drafts.map((m, index) => {
     const outcomes = m.outcomes as unknown[];
     const outcomeSlotCount = Array.isArray(outcomes) ? outcomes.length : 2;
     const duration = Math.max(
@@ -519,7 +517,7 @@ export async function getDraftMarketsForCre(
     );
     return {
       marketId: m.id,
-      question: m.name,
+      question: withQuestionUniqueSuffix(m.name ?? "", index),
       oracle: m.oracleAddress,
       creatorAddress: m.creatorAddress,
       duration,

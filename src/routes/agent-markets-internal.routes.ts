@@ -2,6 +2,10 @@
  * Agent-driven market creation flow:
  * - /api/internal/*: require API key (CRE or cron).
  * - /api/cre/*: no auth; for CRE workflow only (e.g. Docker). Expose only to trusted network.
+ *
+ * Onchain-created callbacks (CRE notifies backend after createMarket):
+ * - Single: POST .../onchain-created (one market per request). Used when CRE fetches via GET (HTTP cap).
+ * - Batch:  POST .../onchain-created-batch (body: { markets: [...] }). Used when backend sends markets in request body; CRE sends one batch with all results. Every callback item is applied; if getMarket is not yet visible we still store questionId+createMarketTxHash and the pending poll fills conditionId later.
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
@@ -11,6 +15,7 @@ import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-ma
 import { createPlatformPositionsForMarket } from "../services/platform-positions.service.js";
 import { generateAgentMarkets } from "../services/agent-market-creation.service.js";
 import { getMarketFromChain } from "../services/cre-pending-markets.js";
+import { stripQuestionUniqueSuffix } from "../lib/cre-question-unique-suffix.js";
 import { getOutcomePositionIds } from "../services/conditional-tokens.service.js";
 import { config } from "../config/index.js";
 import {
@@ -59,8 +64,8 @@ function rawUsdcToDecimalString(raw: bigint): string {
   return fracStr === "0".repeat(8) ? intPart.toString() : `${intPart}.${fracStr}`;
 }
 
-const GET_MARKET_RETRY_MS = 2_000;
-const GET_MARKET_RETRIES = 3;
+const GET_MARKET_RETRY_MS = 3_000;
+const GET_MARKET_RETRIES = 5;
 
 async function getMarketFromChainWithRetry(
   questionId: string
@@ -81,18 +86,33 @@ async function createMarketFromOnchainResult(
   const prisma = getPrismaClient();
 
   const chainMarket = await getMarketFromChainWithRetry(body.questionId);
-  if (!chainMarket) {
-    throw new Error(
-      "Market not found on chain (getMarket). Ensure CHAIN_RPC_URL is set and points to the same chain CRE used; market may need a few seconds to be visible."
-    );
-  }
-  const conditionId = chainMarket.conditionId;
 
   if (body.marketId) {
     const draft = await prisma.market.findUnique({
       where: { id: body.marketId },
     });
     if (draft && draft.questionId == null) {
+      if (!chainMarket) {
+        await prisma.market.update({
+          where: { id: body.marketId },
+          data: {
+            questionId: body.questionId,
+            createMarketTxHash: body.createMarketTxHash,
+          },
+        });
+        const updated = await prisma.market.findUnique({
+          where: { id: body.marketId },
+        });
+        if (updated) {
+          return {
+            market: serializeMarket(updated),
+            createMarketTxHash: body.createMarketTxHash,
+          };
+        }
+      }
+    }
+    if (draft && draft.questionId == null && chainMarket) {
+      const conditionId = chainMarket.conditionId;
       const collateralToken =
         config.defaultCollateralToken?.trim() &&
         config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
@@ -131,6 +151,13 @@ async function createMarketFromOnchainResult(
     }
   }
 
+  if (!chainMarket) {
+    throw new Error(
+      "Market not found on chain (getMarket). Ensure CHAIN_RPC_URL is set and points to the same chain CRE used; market may need a few seconds to be visible."
+    );
+  }
+  const conditionId = chainMarket.conditionId;
+
   const existing = await prisma.market.findFirst({
     where: { conditionId },
   });
@@ -168,7 +195,7 @@ async function createMarketFromOnchainResult(
 
   const market = await prisma.market.create({
     data: {
-      name: chainMarket.question,
+      name: stripQuestionUniqueSuffix(chainMarket.question),
       creatorAddress: chainMarket.owner,
       context: null,
       outcomes: outcomes as object,

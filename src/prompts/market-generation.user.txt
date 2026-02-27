@@ -1,0 +1,1 @@
+Generate exactly {{COUNT}} prediction market questions. {{EMPHASIS_INSTRUCTION}} Return only the JSON array.

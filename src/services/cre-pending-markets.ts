@@ -10,6 +10,7 @@ import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { computeQuestionId } from "../lib/cre-question-id.js";
+import { stripQuestionUniqueSuffix } from "../lib/cre-question-unique-suffix.js";
 import { createPlatformPositionsForMarket } from "./platform-positions.service.js";
 import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { seedMarketLiquidityOnChain } from "./seed-market-liquidity.service.js";
@@ -181,9 +182,10 @@ async function persistMarketFromChain(
   if (item.marketId) {
     const draft = await prisma.market.findUnique({
       where: { id: item.marketId },
-      select: { id: true, questionId: true, collateralToken: true },
+      select: { id: true, questionId: true, conditionId: true, collateralToken: true },
     });
-    if (draft && draft.questionId == null) {
+    const needsChainData = draft && (draft.questionId == null || draft.conditionId == null);
+    if (needsChainData && draft) {
       const outcomeCount = Number(chainMarket.outcomeSlotCount);
       const collateralToken =
         config.defaultCollateralToken?.trim() &&
@@ -248,7 +250,7 @@ async function persistMarketFromChain(
 
   const market = await prisma.market.create({
     data: {
-      name: chainMarket.question,
+      name: stripQuestionUniqueSuffix(chainMarket.question),
       creatorAddress: chainMarket.owner,
       context: null,
       outcomes: outcomes as object,
