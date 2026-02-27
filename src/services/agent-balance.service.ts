@@ -3,20 +3,22 @@
  * update DB if different, and broadcast agent update. Reusable by transfer and balance-update flows.
  */
 
+import { createRequire } from "module";
 import { Decimal } from "decimal.js";
 import { createPublicClient, http, type Address } from "viem";
 import { sepolia } from "viem/chains";
-import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { broadcastAgentUpdate } from "../lib/broadcast-agent.js";
 import { upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
 import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 
-const contracts = contractsData as {
+const require = createRequire(import.meta.url);
+const contractsData = require("../lib/contracts.json") as {
   contracts?: { usdc?: string };
   conventions?: { usdcDecimals?: number };
 };
+const contracts = contractsData;
 
 const ERC20_BALANCE_OF_ABI = [
   {

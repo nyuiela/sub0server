@@ -8,6 +8,7 @@
  * - Batch:  POST .../onchain-created-batch (body: { markets: [...] }). Used when backend sends markets in request body; CRE sends one batch with all results. Every callback item is applied; if getMarket is not yet visible we still store questionId+createMarketTxHash and the pending poll fills conditionId later.
  */
 
+import type { Hex } from "viem";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { requireApiKeyOnly } from "../lib/permissions.js";
 import { getPrismaClient } from "../lib/prisma.js";
@@ -17,6 +18,7 @@ import { generateAgentMarkets } from "../services/agent-market-creation.service.
 import { getMarketFromChain } from "../services/cre-pending-markets.js";
 import { stripQuestionUniqueSuffix } from "../lib/cre-question-unique-suffix.js";
 import { getOutcomePositionIds } from "../services/conditional-tokens.service.js";
+import { seedMarketLiquidityOnChain } from "../services/seed-market-liquidity.service.js";
 import { config } from "../config/index.js";
 import {
   onchainMarketCreatedSchema,
@@ -138,14 +140,24 @@ async function createMarketFromOnchainResult(
         updated.collateralToken,
         outcomePositionIds
       );
-      const initialVolume = "0";
+      const questionIdHex = (body.questionId.startsWith("0x")
+        ? body.questionId
+        : `0x${body.questionId}`) as Hex;
+      const seeded = await seedMarketLiquidityOnChain(questionIdHex, config.platformSeedAmountUsdcRaw);
+      const initialVolume = seeded ? rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw) : "0";
+      const initialLiquidity = initialVolume;
+      await prisma.market.update({
+        where: { id: updated.id },
+        data: { volume: initialVolume, liquidity: initialLiquidity },
+      });
       await broadcastMarketUpdate({
         marketId: updated.id,
         reason: MARKET_UPDATE_REASON.CREATED,
         volume: initialVolume,
       });
+      const refreshed = await prisma.market.findUnique({ where: { id: updated.id } });
       return {
-        market: serializeMarket(updated),
+        market: serializeMarket(refreshed ?? updated),
         createMarketTxHash: body.createMarketTxHash,
       };
     }
@@ -189,8 +201,11 @@ async function createMarketFromOnchainResult(
       ? ["Yes", "No"]
       : Array.from({ length: outcomeCount }, (_, i) => `Outcome ${i + 1}`);
 
-  const hasSeedTx = Boolean(body.seedTxHash?.trim());
-  const initialVolume = hasSeedTx ? rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw) : "0";
+  const questionIdHex = (body.questionId.startsWith("0x")
+    ? body.questionId
+    : `0x${body.questionId}`) as Hex;
+  const seeded = await seedMarketLiquidityOnChain(questionIdHex, config.platformSeedAmountUsdcRaw);
+  const initialVolume = seeded ? rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw) : "0";
   const initialLiquidity = initialVolume;
 
   const market = await prisma.market.create({

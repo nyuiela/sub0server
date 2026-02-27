@@ -3,15 +3,17 @@
  * Used after a CRE-created market is persisted; signs tx with CONTRACT_PRIVATE_KEY.
  */
 
+import { createRequire } from "module";
 import { createPublicClient, createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
 
+const require = createRequire(import.meta.url);
+const contractsData = require("../lib/contracts.json") as { contracts?: { predictionVault?: string } };
+
 const PREDICTION_VAULT_ADDRESS =
-  (contractsData as { contracts?: { predictionVault?: string } }).contracts?.predictionVault ??
-  "0x37Ad1be17Be247854F9D4F8Af95eeEFFDe0b179E";
+  contractsData.contracts?.predictionVault ?? "0x37Ad1be17Be247854F9D4F8Af95eeEFFDe0b179E";
 
 const SEED_MARKET_LIQUIDITY_ABI = [
   {

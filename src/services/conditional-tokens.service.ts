@@ -3,15 +3,17 @@
  * Used when persisting a market so we store the CT position ID per outcome.
  */
 
+import { createRequire } from "module";
 import { createPublicClient, http, type Address, type Hex } from "viem";
 import { sepolia } from "viem/chains";
-import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
 
-const contracts = contractsData as {
+const require = createRequire(import.meta.url);
+const contractsData = require("../lib/contracts.json") as {
   contracts?: { conditionalTokens?: string };
   conventions?: { parentCollectionId?: string };
 };
+const contracts = contractsData;
 
 const CT_ADDRESS =
   (contracts.contracts?.conditionalTokens as Address) ??

@@ -3,20 +3,18 @@
  * Uses CONTRACT_PRIVATE_KEY as funder; agentPrivateKeyHex for the two approvals.
  */
 
+import { createRequire } from "module";
 import type { FastifyBaseLogger } from "fastify";
 import { createPublicClient, createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
-import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
 
-const contracts = contractsData as {
-  contracts?: {
-    usdc?: string;
-    conditionalTokens?: string;
-    predictionVault?: string;
-  };
+const require = createRequire(import.meta.url);
+const contractsData = require("../lib/contracts.json") as {
+  contracts?: { usdc?: string; conditionalTokens?: string; predictionVault?: string };
 };
+const contracts = contractsData;
 const USDC_ADDRESS = contracts.contracts?.usdc ?? "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
 const CT_ADDRESS =
   contracts.contracts?.conditionalTokens ?? "0xB01f9A7824fc1ffEF9c428AA8C0225b0e308a4F4";

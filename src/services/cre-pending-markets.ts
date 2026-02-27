@@ -4,10 +4,13 @@
  * we persist it to the DB.
  */
 
+import { createRequire } from "module";
 import { createPublicClient, http, type Hex } from "viem";
 import { sepolia } from "viem/chains";
-import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
+
+const require = createRequire(import.meta.url);
+const contractsData = require("../lib/contracts.json") as { contracts?: { sub0?: string; usdc?: string } };
 import { getPrismaClient } from "../lib/prisma.js";
 import { computeQuestionId } from "../lib/cre-question-id.js";
 import { stripQuestionUniqueSuffix } from "../lib/cre-question-unique-suffix.js";
@@ -23,8 +26,7 @@ const POLL_DELAY_MS = 15_000;
 const MAX_PENDING_AGE_MS = 120_000;
 
 const SUB0_ADDRESS =
-  (contractsData as { contracts?: { sub0?: string } }).contracts?.sub0 ??
-  "0x45bec1219aE7442C93CBB32d63Df374d94e1df2A";
+  contractsData.contracts?.sub0 ?? "0x45bec1219aE7442C93CBB32d63Df374d94e1df2A";
 
 interface PendingItem {
   questionId: Hex;
@@ -191,8 +193,7 @@ async function persistMarketFromChain(
         config.defaultCollateralToken?.trim() &&
         config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
           ? config.defaultCollateralToken
-          : (contractsData as { contracts?: { usdc?: string } }).contracts?.usdc ??
-            "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+          : contractsData.contracts?.usdc ?? "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
       const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
       if (outcomePositionIds != null) {
         await prisma.market.update({
@@ -209,10 +210,18 @@ async function persistMarketFromChain(
           draft.collateralToken,
           outcomePositionIds
         );
+        const amountUsdcRaw = config.platformSeedAmountUsdcRaw;
+        const seeded = await seedMarketLiquidityOnChain(item.questionId, amountUsdcRaw);
+        const initialVolume = seeded ? rawUsdcToDecimalString(amountUsdcRaw) : "0";
+        const initialLiquidity = initialVolume;
+        await prisma.market.update({
+          where: { id: item.marketId },
+          data: { volume: initialVolume, liquidity: initialLiquidity },
+        });
         await broadcastMarketUpdate({
           marketId: item.marketId,
           reason: MARKET_UPDATE_REASON.CREATED,
-          volume: "0",
+          volume: initialVolume,
         });
       }
       removePending(item.questionId);
