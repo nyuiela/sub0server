@@ -5,6 +5,7 @@ import { submitOrder } from "../engine/order-queue.js";
 import { requireUserOrApiKey } from "../lib/permissions.js";
 import { requireUser, requireApiKey } from "../lib/auth.js";
 import { orderSubmitSchema, type OrderSubmitInput } from "../schemas/order.schema.js";
+import type { CreOrderPayload } from "../types/cre-order.js";
 
 export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/orders", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
@@ -23,7 +24,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
     const prisma = getPrismaClient();
     const market = await prisma.market.findUnique({
       where: { id: raw.marketId },
-      select: { outcomes: true },
+      select: { outcomes: true, questionId: true, conditionId: true },
     });
     if (!market) return reply.code(404).send({ error: "Market not found" });
     const outcomes = market.outcomes as unknown[];
@@ -43,6 +44,28 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
     const userId = isApiKey ? (raw.userId ?? undefined) : (authUser?.userId ?? undefined);
     const agentId = isApiKey ? (raw.agentId ?? undefined) : undefined;
 
+    const isUserOrder = userId != null && userId !== "" && (agentId == null || agentId === "");
+    if (isUserOrder && (!market.questionId || !market.conditionId)) {
+      return reply.code(400).send({
+        error: "Market has no questionId/conditionId; CRE execution requires them for user orders",
+      });
+    }
+
+    let crePayload: CreOrderPayload | undefined;
+    if (isUserOrder && raw.userSignature && raw.tradeCostUsdc != null && raw.nonce != null && raw.deadline != null && market.questionId && market.conditionId) {
+      crePayload = {
+        questionId: market.questionId,
+        conditionId: market.conditionId,
+        outcomeIndex: raw.outcomeIndex,
+        buy: raw.side === "BID",
+        quantity: String(raw.quantity),
+        tradeCostUsdc: raw.tradeCostUsdc,
+        nonce: raw.nonce,
+        deadline: raw.deadline,
+        userSignature: raw.userSignature,
+      };
+    }
+
     const input = {
       id: randomUUID(),
       marketId: raw.marketId,
@@ -53,6 +76,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       quantity: raw.quantity,
       userId,
       agentId,
+      crePayload: crePayload ?? null,
     };
     try {
       const result = await submitOrder(input);

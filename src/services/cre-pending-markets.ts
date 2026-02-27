@@ -13,6 +13,7 @@ import { computeQuestionId } from "../lib/cre-question-id.js";
 import { createPlatformPositionsForMarket } from "./platform-positions.service.js";
 import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { seedMarketLiquidityOnChain } from "./seed-market-liquidity.service.js";
+import { getOutcomePositionIds } from "./conditional-tokens.service.js";
 import type { CreCreateMarketPayload } from "../types/agent-markets.js";
 
 const USDC_DECIMALS = 6;
@@ -99,6 +100,50 @@ export function addPending(payloads: CreCreateMarketPayload[]): void {
   }
 }
 
+export interface ChainMarketStruct {
+  question: string;
+  conditionId: string;
+  oracle: string;
+  owner: string;
+  createdAt: bigint;
+  duration: bigint;
+  outcomeSlotCount: number;
+  oracleType: number;
+  marketType: number;
+}
+
+/**
+ * Fetch market struct from Sub0 contract getMarket(questionId). Returns null if not on chain or RPC error.
+ */
+export async function getMarketFromChain(questionId: string): Promise<ChainMarketStruct | null> {
+  const client = getClient();
+  if (!client) return null;
+  const qId = questionId.startsWith("0x") ? (questionId as Hex) : (`0x${questionId}` as Hex);
+  try {
+    const result = await client.readContract({
+      address: SUB0_ADDRESS as Hex,
+      abi: SUB0_GET_MARKET_ABI,
+      functionName: "getMarket",
+      args: [qId],
+    });
+    const zeroCondition = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
+    if (result.conditionId === zeroCondition) return null;
+    return {
+      question: result.question,
+      conditionId: result.conditionId as string,
+      oracle: result.oracle,
+      owner: result.owner,
+      createdAt: result.createdAt,
+      duration: result.duration,
+      outcomeSlotCount: Number(result.outcomeSlotCount),
+      oracleType: result.oracleType,
+      marketType: result.marketType,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function getPendingToPoll(): PendingItem[] {
   const now = Date.now();
   return pending.filter(
@@ -136,43 +181,64 @@ async function persistMarketFromChain(
     return;
   }
   const outcomeCount = Number(chainMarket.outcomeSlotCount);
+  const collateralToken =
+    config.defaultCollateralToken?.trim() &&
+    config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
+      ? config.defaultCollateralToken
+      : (contractsData as { contracts?: { usdc?: string } }).contracts?.usdc ??
+        "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+
+  const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
+  if (outcomePositionIds == null) {
+    console.warn(`CRE pending: could not get CT position IDs for conditionId ${conditionId}, skipping persist`);
+    return;
+  }
+
   const resolutionDate = new Date(Date.now() + Number(chainMarket.duration) * 1000);
   const outcomes =
     outcomeCount === 2
       ? ["Yes", "No"]
       : Array.from({ length: outcomeCount }, (_, i) => `Outcome ${i + 1}`);
+
   const market = await prisma.market.create({
     data: {
       name: chainMarket.question,
       creatorAddress: chainMarket.owner,
       context: null,
       outcomes: outcomes as object,
+      outcomePositionIds: outcomePositionIds as object,
       resolutionDate,
       oracleAddress: chainMarket.oracle,
-      collateralToken: config.defaultCollateralToken,
+      collateralToken,
       conditionId,
       questionId: item.questionId,
       platform: "NATIVE",
       agentSource: item.agentSource ?? null,
     },
   });
-  const outcomePositionIds = market.outcomePositionIds as string[] | null;
+
   await createPlatformPositionsForMarket(
     market.id,
     outcomeCount,
     market.collateralToken,
-    Array.isArray(outcomePositionIds) ? outcomePositionIds : null
+    outcomePositionIds
   );
 
   const amountUsdcRaw = config.platformSeedAmountUsdcRaw;
   const seeded = await seedMarketLiquidityOnChain(item.questionId, amountUsdcRaw);
-  const initialVolume =
-    seeded ? rawUsdcToDecimalString(amountUsdcRaw) : "0";
-  if (seeded) {
-    await prisma.market.update({
-      where: { id: market.id },
-      data: { volume: initialVolume },
-    });
+  const initialVolume = seeded ? rawUsdcToDecimalString(amountUsdcRaw) : "0";
+  const initialLiquidity = initialVolume;
+
+  await prisma.market.update({
+    where: { id: market.id },
+    data: {
+      volume: initialVolume,
+      liquidity: initialLiquidity,
+    },
+  });
+
+  if (!seeded) {
+    console.warn(`CRE pending: seed failed for questionId ${item.questionId}, market ${market.id} created with zero volume/liquidity`);
   }
 
   await broadcastMarketUpdate({

@@ -212,6 +212,7 @@ export class OrderBook {
         createdAt: Date.now(),
         userId: input.userId,
         agentId: input.agentId,
+        crePayload: input.crePayload ?? null,
       };
       return { order: rejected, trades: [], orderBookSnapshot: emptySnapshot };
     }
@@ -235,6 +236,7 @@ export class OrderBook {
         createdAt: Date.now(),
         userId: input.userId,
         agentId: input.agentId,
+        crePayload: input.crePayload ?? null,
       };
       return { order: rejected, trades: [], orderBookSnapshot: emptySnapshot };
     }
@@ -254,6 +256,7 @@ export class OrderBook {
       createdAt: now,
       userId: input.userId,
       agentId: input.agentId,
+      crePayload: input.crePayload ?? null,
     };
 
     const trades: ExecutedTrade[] = [];

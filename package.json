@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "prisma generate",
     "build": "tsc",
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
+    "db:migrate": "prisma migrate dev --name schema_update",
+    "db:fix-drift": "prisma db execute --file prisma/scripts/fix-updated-at-default.sql",
+    "db:recreate-agent-enqueued-market": "prisma db execute --file prisma/scripts/recreate-agent-enqueued-market.sql",
+    "db:reset": "prisma migrate reset --force",
     "db:migrate:fix-history": "prisma migrate resolve --rolled-back 20260227034618_agent_trading",
     "db:seed": "prisma db seed",
     "test": "vitest run",
@@ -26,35 +30,32 @@
     "agent-markets:dry": "tsx src/scripts/run-agent-market-creation.ts --dry-run",
     "agent-markets:generate": "tsx src/scripts/generate-agent-markets-only.ts"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
     "@fastify/cors": "^11.2.0",
     "@fastify/websocket": "^11.0.0",
-    "@prisma/client": "^6.0.0",
-    "bullmq": "^5.0.0",
+    "@prisma/client": "^7.4.0",
+    "bullmq": "^5.70.1",
     "decimal.js": "^10.6.0",
-    "dotenv": "^16.4.5",
-    "fastify": "^5.0.0",
-    "ioredis": "^5.4.0",
-    "jsonwebtoken": "^9.0.2",
-    "prisma": "^6.0.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.7.4",
+    "ioredis": "^5.9.3",
+    "jsonwebtoken": "^9.0.3",
+    "prisma": "^7.4.1",
     "rss-parser": "^3.13.0",
-    "thirdweb": "^5.118.2",
-    "viem": "^2.46.2",
-    "ws": "^8.18.0",
-    "zod": "^3.23.0"
+    "thirdweb": "^5.119.0",
+    "viem": "^2.46.3",
+    "ws": "^8.19.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.3.0",
     "@types/decimal.js": "^7.4.3",
-    "@types/jsonwebtoken": "^9.0.7",
-    "@types/node": "^22.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.19.13",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }
 }

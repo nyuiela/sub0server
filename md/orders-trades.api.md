@@ -36,6 +36,15 @@ Submit a buy (BID) or sell (ASK) order for **one listed option** of a market (e.
 | quantity      | string or number | Yes | Order size. |
 | userId        | string | No (API key only) | UUID of the user. When using user auth (JWT), this is set from the token; do not send it. |
 | agentId       | string | No (API key only) | UUID of the agent. Only accepted when using API key. |
+| userSignature | string | Yes (user orders) | EIP-712 LMSRQuote signature (0x-prefixed hex). Required when the order is attributed to a user (no agentId). Stored and sent to CRE when the order is filled so the trade executes on-chain. |
+| tradeCostUsdc | string | Yes (user orders) | Trade cost in USDC units (decimal string) for the signed quote. Must match the quote the user signed. |
+| nonce         | string | Yes (user orders) | Nonce used in the EIP-712 quote. |
+| deadline      | string | Yes (user orders) | EIP-712 deadline (unix timestamp string). |
+
+**CRE execution on fill**
+
+- **User orders:** When the order is attributed to a user (userId, no agentId), the backend requires `userSignature`, `tradeCostUsdc`, `nonce`, and `deadline`. These are stored in the order pool. When the order becomes **FILLED**, the backend sends one execute-trade request to CRE with the stored signature and quote params; CRE adds the DON signature and submits the trade on-chain.
+- **Agent orders:** When the order is attributed to an agent (agentId), no signature is sent with the order. When the order is filled (each fill), the backend calls CRE **executeConfidentialTrade** with the agent id; CRE signs with the agent key and DON and submits each fill on-chain.
 
 - **LIMIT**: Resting order at the given price; can fill immediately if the book has a matching opposite side.
 - **MARKET**: Fills at best available price(s); no resting quantity.

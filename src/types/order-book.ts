@@ -1,3 +1,5 @@
+import type { CreOrderPayload } from "./cre-order.js";
+
 /**
  * Order side: BID (buy) or ASK (sell).
  * Matching: BIDs match against resting ASKs and vice versa.
@@ -45,11 +47,13 @@ export interface EngineOrder {
   createdAt: number;
   userId?: string | null;
   agentId?: string | null;
+  crePayload?: CreOrderPayload | null;
 }
 
 /**
  * Input order as submitted to the matching engine. price may be omitted for MARKET.
  * outcomeIndex identifies which listed option (e.g. Yes=0, No=1) is being bought/sold.
+ * crePayload: for user orders, quote params + userSignature so CRE can execute on fill.
  */
 export interface OrderInput {
   id: string;
@@ -61,6 +65,7 @@ export interface OrderInput {
   quantity: string | number;
   userId?: string | null;
   agentId?: string | null;
+  crePayload?: CreOrderPayload | null;
 }
 
 /**
@@ -88,6 +93,8 @@ export interface ExecutedTrade {
   makerAgentId?: string | null;
   executedAt: number;
 }
+
+export type { CreOrderPayload } from "./cre-order.js";
 
 /**
  * Single level in the order book snapshot (price + total quantity at that price).
