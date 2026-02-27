@@ -1,8 +1,9 @@
 import { randomBytes } from "crypto";
 import { getAgentRegistrationModel } from "../lib/agent-registration-db.js";
 import { hashAgentApiKey } from "../lib/auth.js";
-import { generateAgentKeys } from "./agent-keys.service.js";
 import { config } from "../config/index.js";
+import { generateAgentKeys } from "./agent-keys.service.js";
+import { CRE_PENDING_PUBLIC_KEY, CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
 import type { SdkAgentRegisterResponse } from "../types/sdk-agent.js";
 
 const API_KEY_BYTES = 32;
@@ -27,7 +28,11 @@ export async function registerSdkAgent(name?: string): Promise<SdkAgentRegisterR
     claimCode = generateClaimCode();
   }
 
-  const keys = generateAgentKeys();
+  const useCre = Boolean(config.creHttpUrl?.trim());
+  const keys = useCre ? null : generateAgentKeys();
+  const walletAddress = useCre ? CRE_PENDING_PUBLIC_KEY : (keys?.publicKey ?? CRE_PENDING_PUBLIC_KEY);
+  const encryptedPrivateKey = useCre ? CRE_PENDING_PRIVATE_KEY : (keys?.encryptedPrivateKey ?? CRE_PENDING_PRIVATE_KEY);
+
   let baseUrl = config.frontendBaseUrl.replace(/\/$/, "");
   if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
     baseUrl = `https://${baseUrl}`;
@@ -40,8 +45,8 @@ export async function registerSdkAgent(name?: string): Promise<SdkAgentRegisterR
       claimCode,
       name: name?.trim() ?? null,
       status: "UNCLAIMED",
-      walletAddress: keys.publicKey,
-      encryptedPrivateKey: keys.encryptedPrivateKey,
+      walletAddress,
+      encryptedPrivateKey,
     },
     select: { id: true },
   });
@@ -52,7 +57,7 @@ export async function registerSdkAgent(name?: string): Promise<SdkAgentRegisterR
     api_key: apiKey,
     claim_code: claimCode,
     claim_url: claimUrl,
-    wallet_address: keys.publicKey,
+    wallet_address: walletAddress,
     ...(name?.trim() ? { name: name.trim() } : {}),
   };
 }

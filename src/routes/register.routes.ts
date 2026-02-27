@@ -2,7 +2,10 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../lib/prisma.js";
 import { requireUser, getJwtFromRequest } from "../lib/auth.js";
+import { config } from "../config/index.js";
+import { requestCreCreateAgentKey } from "../lib/cre-create-agent-key.js";
 import { generateAgentKeys } from "../services/agent-keys.service.js";
+import { CRE_PENDING_PUBLIC_KEY, CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
 import {
   usernameCheckSchema,
   registerBodySchema,
@@ -57,7 +60,20 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
       return reply.code(409).send({ error: "Username already taken" });
     }
 
-    const keys = generateAgentKeys();
+    const useCre = Boolean(config.creHttpUrl?.trim());
+    let publicKey: string;
+    let walletAddress: string | null;
+    let encryptedPrivateKey: string;
+    if (useCre) {
+      publicKey = CRE_PENDING_PUBLIC_KEY;
+      walletAddress = null;
+      encryptedPrivateKey = CRE_PENDING_PRIVATE_KEY;
+    } else {
+      const keys = generateAgentKeys();
+      publicKey = keys.publicKey;
+      walletAddress = keys.publicKey;
+      encryptedPrivateKey = keys.encryptedPrivateKey;
+    }
 
     let agentData: Prisma.AgentCreateWithoutOwnerInput;
     if ("template" in body.agent) {
@@ -69,9 +85,8 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
       agentData = {
         name: t.name.trim(),
         persona: (t.persona ?? t.name).trim(),
-        publicKey: keys.publicKey,
-        walletAddress: keys.publicKey,
-        encryptedPrivateKey: keys.encryptedPrivateKey,
+        publicKey,
+        ...(walletAddress != null ? { walletAddress, encryptedPrivateKey } : { encryptedPrivateKey }),
         modelSettings: (t.modelSettings ?? {}) as Prisma.InputJsonValue,
         template: { connect: { id: t.templateId } },
       };
@@ -80,9 +95,8 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
       agentData = {
         name: c.name.trim(),
         persona: (c.persona ?? c.name).trim(),
-        publicKey: keys.publicKey,
-        walletAddress: keys.publicKey,
-        encryptedPrivateKey: keys.encryptedPrivateKey,
+        publicKey,
+        ...(walletAddress != null ? { walletAddress, encryptedPrivateKey } : { encryptedPrivateKey }),
         modelSettings: (c.modelSettings ?? {}) as Prisma.InputJsonValue,
       };
     }
@@ -101,6 +115,10 @@ export async function registerRegisterRoutes(app: FastifyInstance): Promise<void
     });
 
     const agent = user.agents[0];
+    if (useCre && agent) {
+      await requestCreCreateAgentKey(agent.id);
+    }
+
     return reply.code(201).send({
       user: serializeUser(user),
       agent: agent

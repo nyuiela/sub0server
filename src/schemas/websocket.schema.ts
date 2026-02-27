@@ -28,7 +28,7 @@ const priceUpdatePayload = z.object({
   timestamp: z.string().datetime(),
 });
 
-const roomPattern = z.string().regex(/^(market:[a-fA-F0-9-]+|markets)$/);
+const roomPattern = z.string().regex(/^(market:[a-fA-F0-9-]+|markets|agent:[a-fA-F0-9-]{22,40})$/);
 const subscribePayload = z.object({
   room: roomPattern,
 });

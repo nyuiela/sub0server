@@ -10,15 +10,17 @@ Report for frontend WebSocket integration with the backend. All market-related c
 |------|-----|
 | `market:{marketId}` | Subscribe to receive all updates for one market (order book, trades, market record, positions). |
 | `markets` | Subscribe to receive create/delete notifications so the list view can refetch. |
+| `agent:{agentId}` | Subscribe to receive agent updates (e.g. balance synced from chain). |
 
 **Subscribe (client -> server):**
 
 ```json
 { "type": "SUBSCRIBE", "payload": { "room": "market:<marketId>" } }
 { "type": "SUBSCRIBE", "payload": { "room": "markets" } }
+{ "type": "SUBSCRIBE", "payload": { "room": "agent:<agentId>" } }
 ```
 
-Room format: `market:` + UUID (e.g. `market:1d5c64ea-c561-4e69-888b-3bc84d2f1f07`) or literal `markets`.
+Room format: `market:` + UUID, literal `markets`, or `agent:` + agent UUID.
 
 ---
 
@@ -74,6 +76,22 @@ Sent for each fill when an order matches.
 
 **Payload:** `marketId`, `side` ("long" | "short"), `size`, `price`, `executedAt` (ISO string), optional `userId`, `agentId`.
 
+### AGENT_UPDATED
+
+Emitted when an agent record changes (e.g. balance synced from chain via POST /api/agents/:id/sync-balance). Subscribe to room `agent:{agentId}` to receive.
+
+**Payload:**
+
+```ts
+{
+  agentId: string;
+  balance?: string;
+  reason?: "balance";
+}
+```
+
+On `AGENT_UPDATED`, refetch the agent (GET /api/agents/:id) or merge `payload.balance` into local state.
+
 ### PING / PONG
 
 Server sends PING; client should reply with PONG to avoid disconnection.
@@ -102,6 +120,7 @@ Server sends PING; client should reply with PONG to avoid disconnection.
 | Trade persistence (worker) | market:{id} | MARKET_UPDATED | stats |
 | POST/PATCH/DELETE /api/positions | market:{id} | MARKET_UPDATED | position |
 | Order processed (engine) | market:{id} | ORDER_BOOK_UPDATE, TRADE_EXECUTED, MARKET_UPDATED | orderbook |
+| POST /api/agents/:id/sync-balance (when balance changed) | agent:{id} | AGENT_UPDATED | balance |
 
 ---
 
@@ -109,6 +128,7 @@ Server sends PING; client should reply with PONG to avoid disconnection.
 
 - [ ] Subscribe to `market:{marketId}` when viewing a market.
 - [ ] Subscribe to `markets` when on the markets list.
+- [ ] Subscribe to `agent:{agentId}` when viewing an agent detail; on `AGENT_UPDATED` update balance in state or refetch agent.
 - [ ] On `MARKET_UPDATED`: refetch market or merge `volume`; on `reason: "deleted"` remove from state or redirect.
 - [ ] On `ORDER_BOOK_UPDATE`: update local order book.
 - [ ] On `TRADE_EXECUTED`: update trades list / last trade.

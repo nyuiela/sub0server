@@ -13,6 +13,7 @@ Reference for frontend integration: listing, fetching, and managing trading agen
 | GET | /api/agents/:id | Owner or API key | Get one agent with full metrics |
 | GET | /api/agents/:id/tracks | Owner or API key | Time-series data for charts |
 | GET | /api/agents/:id/reasoning | Owner or API key | Paginated reasoning logs |
+| POST | /api/agents/:id/sync-balance | Owner or API key | Sync USDC/collateral balance from chain, update DB and broadcast if changed |
 | POST | /api/agents | User or API key | Create an agent |
 | PATCH | /api/agents/:id | Owner or API key | Update an agent |
 | DELETE | /api/agents/:id | Owner or API key | Delete an agent |
@@ -283,6 +284,42 @@ Authorization: Bearer <jwt>
 
 - **401:** Unauthenticated.
 - **403:** Forbidden: not owner and not API key.
+
+---
+
+## Sync agent balance
+
+**POST /api/agents/:id/sync-balance**
+
+Reads the agent wallet USDC/collateral balance from chain. If it differs from the stored balance, updates the DB and broadcasts an agent update so WebSocket subscribers receive the new balance. Use after a deposit, transfer, or any flow that changes on-chain balance.
+
+**Authentication:** Owner or API key required.
+
+**Response (200)**
+
+```json
+{
+  "balance": "150.25",
+  "updated": true,
+  "previousBalance": "100",
+  "error": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| balance | string | Current balance (chain value; DB is updated when `updated` is true). |
+| updated | boolean | Whether the DB was updated and a broadcast was sent. |
+| previousBalance | string | Present only when `updated` is true. |
+| error | string | Present when sync could not run (e.g. agent has no wallet, or chain RPC failed). |
+
+When `updated` is true, clients subscribed to room `agent:{agentId}` receive an `AGENT_UPDATED` event with `payload.balance` and `payload.reason: "balance"`. Refetch the agent or merge the balance into local state.
+
+**Errors**
+
+- **401:** Unauthenticated.
+- **403:** Forbidden: not owner and not API key.
+- **404:** Agent not found.
 
 ---
 

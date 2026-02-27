@@ -4,7 +4,9 @@ import { getPrismaClient } from "../lib/prisma.js";
 import { requireAgentOwnerOrApiKey, requireUserOrApiKey } from "../lib/permissions.js";
 import { requireUser, requireApiKey } from "../lib/auth.js";
 import { config } from "../config/index.js";
+import { requestCreCreateAgentKey } from "../lib/cre-create-agent-key.js";
 import { generateAgentKeys } from "../services/agent-keys.service.js";
+import { syncAgentBalance } from "../services/agent-balance.service.js";
 import {
   agentCreateSchema,
   agentUpdateSchema,
@@ -250,6 +252,25 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  /** Sync agent USDC/collateral balance from chain; update DB if different and broadcast AGENT_UPDATED. */
+  app.post("/api/agents/:id/sync-balance", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+    const agentId = req.params.id;
+    const prisma = getPrismaClient();
+    const agent = await prisma.agent.findUnique({
+      where: { id: agentId },
+      select: { id: true },
+    });
+    if (!agent) return reply.code(404).send({ error: "Agent not found" });
+    const result = await syncAgentBalance(agentId);
+    return reply.send({
+      balance: result.balance,
+      updated: result.updated,
+      ...(result.previousBalance != null && { previousBalance: result.previousBalance }),
+      ...(result.error != null && { error: result.error }),
+    });
+  });
+
   app.patch("/api/agents/:id", async (req: FastifyRequest<{ Params: { id: string }; Body: unknown }>, reply: FastifyReply) => {
     if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const parsed = agentUpdateSchema.safeParse(req.body);
@@ -318,8 +339,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  /** Create agent wallet via CRE (createAgentKey). CRE generates the key and stores it in confidential compute;
-   * we only store the returned address. The agent uses CRE (e.g. quote/order) when it needs to sign transactions. */
+  /** Request CRE to create agent wallet (GET createAgentKey). CRE will POST to /api/cre/agent-keys when ready. */
   app.post("/api/agents/:id/create-wallet", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const agentId = req.params.id;
@@ -339,81 +359,34 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         template: existing.template,
       });
     }
-    let updateData: { walletAddress: string; publicKey?: string; encryptedPrivateKey?: string };
-    const creUrl = config.creHttpUrl;
-    if (creUrl) {
-      const body: Record<string, unknown> = { action: "createAgentKey", agentId };
-      if (config.creHttpApiKey) body.apiKey = config.creHttpApiKey;
-      let res: Response;
-      try {
-        res = await fetch(creUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-      } catch (err) {
-        return reply.code(502).send({ error: "CRE request failed", detail: err instanceof Error ? err.message : "Unknown error" });
-      }
-      const text = await res.text();
-      if (!res.ok) {
-        return reply.code(502).send({ error: "CRE returned error", detail: text || String(res.status) });
-      }
-      let data: { address?: string; encryptedKeyBlob?: string };
-      try {
-        data = JSON.parse(text) as { address?: string; encryptedKeyBlob?: string };
-      } catch {
-        return reply.code(502).send({ error: "CRE response invalid", detail: text });
-      }
-      const address = typeof data.address === "string" ? data.address.trim() : "";
-      if (address && address.startsWith("0x")) {
-        const creBlob = typeof data.encryptedKeyBlob === "string" ? data.encryptedKeyBlob.trim() : "";
-        if (creBlob.length > 0) {
-          updateData = { walletAddress: address, encryptedPrivateKey: creBlob };
-          if (existing.publicKey === CRE_PENDING_PUBLIC_KEY) updateData.publicKey = address;
-        } else {
-          /* CRE returned address but empty encryptedKeyBlob (e.g. simulation or workflow not returning blob): use server-generated keys so agent can sign. */
-          const keys = generateAgentKeys();
-          updateData = {
-            walletAddress: keys.publicKey,
-            encryptedPrivateKey: keys.encryptedPrivateKey,
-          };
-          if (existing.publicKey === CRE_PENDING_PUBLIC_KEY) updateData.publicKey = keys.publicKey;
-        }
-      } else {
-        const keys = generateAgentKeys();
-        updateData = {
-          walletAddress: keys.publicKey,
-          encryptedPrivateKey: keys.encryptedPrivateKey,
-        };
-        if (existing.publicKey === CRE_PENDING_PUBLIC_KEY) updateData.publicKey = keys.publicKey;
-      }
-    } else {
-      /* CRE not configured: create wallet with server-generated keys */
+    if (!config.creHttpUrl?.trim()) {
       const keys = generateAgentKeys();
-      updateData = {
-        walletAddress: keys.publicKey,
-        encryptedPrivateKey: keys.encryptedPrivateKey,
-      };
-      if (existing.publicKey === CRE_PENDING_PUBLIC_KEY) updateData.publicKey = keys.publicKey;
+      const agent = await prisma.agent.update({
+        where: { id: agentId },
+        data: {
+          walletAddress: keys.publicKey,
+          publicKey: keys.publicKey,
+          encryptedPrivateKey: keys.encryptedPrivateKey,
+        },
+        include: { owner: { select: { id: true, address: true } }, strategy: true, template: { select: { id: true, name: true } }, openclaw: true },
+      });
+      const modelSettings = modelSettingsWithOpenclaw(agent.modelSettings, agent.openclaw);
+      return reply.send({
+        ...serializeAgent(agent),
+        modelSettings,
+        owner: (agent as { owner?: { address?: string } }).owner?.address ?? "",
+        strategy: agent.strategy,
+        template: agent.template,
+      });
     }
-
-    const agent = await prisma.agent.update({
-      where: { id: agentId },
-      data: updateData,
-      include: {
-        owner: { select: { id: true, address: true } },
-        strategy: true,
-        template: { select: { id: true, name: true } },
-        openclaw: true,
-      },
-    });
-    const modelSettings = modelSettingsWithOpenclaw(agent.modelSettings, agent.openclaw);
-    return reply.send({
-      ...serializeAgent(agent),
-      modelSettings,
-      owner: (agent as { owner?: { address?: string } }).owner?.address ?? "",
-      strategy: agent.strategy,
-      template: agent.template,
+    const sent = await requestCreCreateAgentKey(agentId);
+    if (!sent) {
+      return reply.code(502).send({ error: "CRE request failed" });
+    }
+    return reply.code(202).send({
+      accepted: true,
+      agentId,
+      message: "CRE createAgentKey requested; wallet will be set when CRE posts to /api/cre/agent-keys",
     });
   });
 
@@ -518,16 +491,20 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     });
 
     if (publicKey === CRE_PENDING_PUBLIC_KEY || encryptedPrivateKey === CRE_PENDING_PRIVATE_KEY) {
-      const keys = generateAgentKeys();
-      agent = await prisma.agent.update({
-        where: { id: agent.id },
-        data: {
-          walletAddress: keys.publicKey,
-          publicKey: keys.publicKey,
-          encryptedPrivateKey: keys.encryptedPrivateKey,
-        },
-        include: { owner: { select: { id: true, address: true } } },
-      });
+      if (config.creHttpUrl?.trim()) {
+        await requestCreCreateAgentKey(agent.id);
+      } else {
+        const keys = generateAgentKeys();
+        agent = await prisma.agent.update({
+          where: { id: agent.id },
+          data: {
+            walletAddress: keys.publicKey,
+            publicKey: keys.publicKey,
+            encryptedPrivateKey: keys.encryptedPrivateKey,
+          },
+          include: { owner: { select: { id: true, address: true } } },
+        });
+      }
     }
 
     return reply.code(201).send({ ...serializeAgent(agent), owner: (agent as { owner?: { address?: string } }).owner?.address ?? "" });

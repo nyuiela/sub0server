@@ -12,6 +12,7 @@ import type {
   WsEventName,
   OrderBookUpdatePayload,
   MarketUpdatedPayload,
+  AgentUpdatedPayload,
 } from "../types/websocket-events.js";
 import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.js";
 
@@ -51,7 +52,8 @@ export class SocketManager {
       BROADCAST_CHANNEL,
       REDIS_CHANNELS.ORDER_BOOK_UPDATE,
       REDIS_CHANNELS.TRADES,
-      REDIS_CHANNELS.MARKET_UPDATES
+      REDIS_CHANNELS.MARKET_UPDATES,
+      REDIS_CHANNELS.AGENT_UPDATES
     );
     sub.on("message", (channel: string, message: string) => {
       try {
@@ -125,6 +127,20 @@ export class SocketManager {
           if (payload.reason === "created" || payload.reason === "deleted") {
             this.broadcastToLocalRoom("markets", msg);
           }
+          return;
+        }
+        if (channel === REDIS_CHANNELS.AGENT_UPDATES) {
+          const raw = JSON.parse(message) as { agentId: string; balance?: string; reason?: string };
+          const payload: AgentUpdatedPayload = {
+            agentId: raw.agentId,
+            balance: raw.balance,
+            reason: raw.reason === "balance" ? "balance" : undefined,
+          };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.AGENT_UPDATED,
+            payload,
+          };
+          this.broadcastToLocalRoom(`agent:${raw.agentId}`, msg);
         }
       } catch {
         // ignore malformed

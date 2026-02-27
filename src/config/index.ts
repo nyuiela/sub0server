@@ -155,10 +155,22 @@ function makeConfig() {
     get chainRpcUrl(): string | undefined {
       return process.env.CHAIN_RPC_URL?.trim() || process.env.SEPOLIA_RPC_URL?.trim() || undefined;
     },
-    /** Private key for signing chain txs (e.g. predictionVault.seedMarketLiquidity). Must be owner of predictionVault. */
+    /** Private key for signing chain txs (e.g. predictionVault.seedMarketLiquidity, agent ETH fund). Must hold ETH to fund new agent wallets. */
     get contractPrivateKey(): `0x${string}` | undefined {
       const k = process.env.CONTRACT_PRIVATE_KEY?.trim();
       return k?.startsWith("0x") ? (k as `0x${string}`) : k ? (`0x${k}` as `0x${string}`) : undefined;
+    },
+    /** ETH amount in wei to send to new agent wallet on onboarding (default 0.03 ETH). */
+    get agentOnboardingEthWei(): bigint {
+      const raw = process.env.AGENT_ONBOARDING_ETH_WEI?.trim();
+      if (raw) {
+        try {
+          return BigInt(raw);
+        } catch {
+          // fallback
+        }
+      }
+      return BigInt("30000000000000000"); // 0.03 ETH
     },
     /** USDC amount for predictionVault.seedMarketLiquidity in smallest units (6 decimals). Use PLATFORM_INITIAL_LIQUIDITY_RAW for raw bigint, else PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME (number) * 10^6. */
     get platformSeedAmountUsdcRaw(): bigint {
@@ -290,6 +302,7 @@ export const REDIS_CHANNELS = {
   MARKET_UPDATES: "market_updates",
   TRADES: "trades",
   ORDER_BOOK_UPDATE: "order_book_update",
+  AGENT_UPDATES: "agent_updates",
 } as const;
 
 export const HEARTBEAT_INTERVAL_MS = 30_000;

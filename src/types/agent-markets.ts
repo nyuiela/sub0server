@@ -33,6 +33,17 @@ export interface CreCreateMarketPayload {
 }
 
 /**
+ * Payload for CRE createAgentKey action (GET query params or POST body).
+ * CRE will later POST to /api/cre/agent-keys with the generated keys.
+ */
+export interface CreCreateAgentKeyPayload {
+  action: "createAgentKey";
+  agentId: string;
+  funderNonce: number;
+  apiKey?: string;
+}
+
+/**
  * Callback body when a market has been created on-chain (CRE or relayer calls backend).
  * Used to persist the market in the DB (conditionId = questionId).
  */

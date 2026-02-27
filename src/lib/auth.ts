@@ -70,6 +70,18 @@ export function getApiKeyFromRequest(req: FastifyRequest): string | null {
   return null;
 }
 
+const CRE_GENERATED_PREFIX_LOWER = "cre-generated ";
+const CRE_GENERATED_PREFIX_LEN = "CRE-Generated ".length;
+
+/** Returns the API key if Authorization is "CRE-Generated <apiKey>", else null. */
+export function getCreGeneratedApiKey(req: FastifyRequest): string | null {
+  const auth = req.headers[AUTH_HEADER];
+  if (typeof auth !== "string") return null;
+  const trimmed = auth.trim();
+  if (!trimmed.toLowerCase().startsWith(CRE_GENERATED_PREFIX_LOWER)) return null;
+  return trimmed.slice(CRE_GENERATED_PREFIX_LEN).trim() || null;
+}
+
 /** Token that might be internal API key or SDK agent api_key (Bearer or x-api-key). */
 export function getBearerOrApiKeyToken(req: FastifyRequest): string | null {
   const auth = req.headers["authorization"];
@@ -92,6 +104,13 @@ export function verifyApiKey(key: string): boolean {
   const expected = config.apiKey;
   if (!expected) return false;
   return key === expected;
+}
+
+/** True if key matches API_KEY or CRE_HTTP_API_KEY (for CRE-Generated header). */
+export function verifyCreGeneratedKey(key: string): boolean {
+  const api = config.apiKey ?? config.creHttpApiKey;
+  if (!api) return false;
+  return key === api;
 }
 
 export async function resolveRequestAuth(req: FastifyRequest): Promise<import("../types/auth.js").RequestAuth> {

@@ -5,6 +5,7 @@ export const WS_EVENT_NAMES = {
   TRADE_EXECUTED: "TRADE_EXECUTED",
   ORDER_BOOK_UPDATE: "ORDER_BOOK_UPDATE",
   PRICE_UPDATE: "PRICE_UPDATE",
+  AGENT_UPDATED: "AGENT_UPDATED",
   SUBSCRIBE: "SUBSCRIBE",
   UNSUBSCRIBE: "UNSUBSCRIBE",
   PING: "PING",
@@ -64,6 +65,13 @@ export interface PriceUpdatePayload {
   timestamp: string;
 }
 
+/** Emitted when agent record changes (e.g. balance synced from chain). */
+export interface AgentUpdatedPayload {
+  agentId: string;
+  balance?: string;
+  reason?: "balance";
+}
+
 export interface SubscribePayload {
   room: string;
 }
@@ -84,6 +92,7 @@ export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.TRADE_EXECUTED]: TradeExecutedPayload;
   [WS_EVENT_NAMES.ORDER_BOOK_UPDATE]: OrderBookUpdatePayload;
   [WS_EVENT_NAMES.PRICE_UPDATE]: PriceUpdatePayload;
+  [WS_EVENT_NAMES.AGENT_UPDATED]: AgentUpdatedPayload;
   [WS_EVENT_NAMES.SUBSCRIBE]: SubscribePayload;
   [WS_EVENT_NAMES.UNSUBSCRIBE]: UnsubscribePayload;
   [WS_EVENT_NAMES.PING]: undefined;

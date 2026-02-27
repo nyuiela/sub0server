@@ -6,8 +6,10 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getPrismaClient } from "../lib/prisma.js";
 import { getAgentRegistrationModel } from "../lib/agent-registration-db.js";
+import { requestCreCreateAgentKey } from "../lib/cre-create-agent-key.js";
 import { registerSdkAgent } from "../services/agent-registration.service.js";
 import { recoverAddressFromSignature, normalizeAddress } from "../lib/verify-signature.js";
+import { CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
 import type { SdkAgentRegisterBody, SdkClaimSubmitBody } from "../types/sdk-agent.js";
 
 export async function registerSdkAgentRoutes(app: FastifyInstance): Promise<void> {
@@ -106,21 +108,26 @@ export async function registerSdkAgentRoutes(app: FastifyInstance): Promise<void
         });
       }
 
-      /* BYOA: registration already has a dedicated agent wallet (not the user's wallet). We link that wallet to the agent.
-       * The private key is in the registration (created externally); signing for this agent goes through CRE when the agent trades. */
+      /* BYOA: registration has wallet/key or CRE pending. If pending, CRE will POST /api/cre/agent-keys later. */
       const agentWallet = reg.walletAddress as string;
+      const encKey = reg.encryptedPrivateKey as string;
+      const isCrePending = encKey === CRE_PENDING_PRIVATE_KEY;
       const agent = await prisma.agent.create({
         data: {
           ownerId: user.id,
           name: (reg.name as string | null) ?? "Claimed Agent",
           persona: (reg.name as string | null) ?? "Claimed Agent",
           publicKey: agentWallet,
-          walletAddress: agentWallet,
-          encryptedPrivateKey: reg.encryptedPrivateKey as string,
+          walletAddress: isCrePending ? null : agentWallet,
+          encryptedPrivateKey: encKey,
           modelSettings: {},
         },
         select: { id: true },
       });
+
+      if (isCrePending) {
+        await requestCreCreateAgentKey(agent.id);
+      }
 
       await agentReg.update({
         where: { id: reg.id as string },
