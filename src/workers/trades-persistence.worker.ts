@@ -17,7 +17,9 @@ import { getPrismaClient } from "../lib/prisma.js";
 import { getRedisPublisher } from "../lib/redis.js";
 import type { PrismaClient } from "@prisma/client";
 import type { ExecutedTrade, EngineOrder } from "../types/order-book.js";
+import type { CreOrderPayload } from "../types/cre-order.js";
 import { TRADES_QUEUE_NAME, type TradesJobPayload } from "./trades-queue.js";
+import { executeUserTradeOnCre, executeAgentTradeOnCre } from "../services/cre-execute-trade.service.js";
 
 async function resolveAddress(
   prisma: PrismaClient,
@@ -229,6 +231,77 @@ function volumeDeltaByMarket(trades: ExecutedTrade[]): Map<string, number> {
   return byMarket;
 }
 
+/** USDC 6 decimals; tradeCostUsdc for a fill = quantity * price. */
+function tradeCostUsdcForFill(quantity: string, price: string): string {
+  return new Decimal(quantity).times(price).toDecimalPlaces(6).toFixed();
+}
+
+/**
+ * Execute on CRE: user order once when FILLED (with stored crePayload); agent orders per fill.
+ */
+async function executeCreTrades(
+  prisma: PrismaClient,
+  order: EngineOrder | undefined,
+  trades: ExecutedTrade[]
+): Promise<void> {
+  if (order?.status === "FILLED" && order.crePayload != null) {
+    const payload = order.crePayload as CreOrderPayload;
+    if (payload.userSignature) {
+      const result = await executeUserTradeOnCre(payload);
+      if (!result.ok) {
+        console.warn(`CRE user trade failed (order ${order.id}):`, result.error);
+      }
+    }
+  }
+
+  const deadline = String(Math.floor(Date.now() / 1000) + 300);
+  const nonce = "0";
+
+  for (const t of trades) {
+    const market = await prisma.market.findUnique({
+      where: { id: t.marketId },
+      select: { questionId: true },
+    });
+    const questionId = market?.questionId?.trim();
+    if (!questionId) continue;
+
+    const tradeCostUsdc = tradeCostUsdcForFill(t.quantity, t.price);
+    const buy = t.side === "BID";
+
+    if (t.agentId) {
+      const result = await executeAgentTradeOnCre({
+        agentId: t.agentId,
+        questionId,
+        outcomeIndex: t.outcomeIndex,
+        buy,
+        quantity: t.quantity,
+        tradeCostUsdc,
+        nonce,
+        deadline,
+      });
+      if (!result.ok) {
+        console.warn(`CRE agent trade failed (taker ${t.agentId}, trade ${t.id}):`, result.error);
+      }
+    }
+
+    if (t.makerAgentId) {
+      const result = await executeAgentTradeOnCre({
+        agentId: t.makerAgentId,
+        questionId,
+        outcomeIndex: t.outcomeIndex,
+        buy: !buy,
+        quantity: t.quantity,
+        tradeCostUsdc,
+        nonce,
+        deadline,
+      });
+      if (!result.ok) {
+        console.warn(`CRE agent trade failed (maker ${t.makerAgentId}, trade ${t.id}):`, result.error);
+      }
+    }
+  }
+}
+
 async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
   const { order, trades } = job.data;
   if (trades.length === 0 && !order) return;
@@ -259,6 +332,9 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
         status: order.status,
         createdAt: new Date(order.createdAt),
         updatedAt: now,
+        userId: order.userId ?? undefined,
+        agentId: order.agentId ?? undefined,
+        crePayload: order.crePayload != null ? (order.crePayload as object) : undefined,
       },
       update: {
         type: order.type,
@@ -288,6 +364,8 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
 
   await updateMakerOrderStatuses(prisma, trades);
   await applyTradesToPositions(prisma, trades);
+
+  await executeCreTrades(prisma, order, trades);
 
   const volumeDeltas = volumeDeltaByMarket(trades);
   const marketIds = [...volumeDeltas.keys()];

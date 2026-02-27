@@ -1,14 +1,14 @@
 {
   "chainId": 11155111,
-  "chainSelectorName": "ethereum-testnet-sepolia",
   "chainRpcUrl": "https://sepolia.drpc.org",
+  "chainSelectorName": "ethereum-testnet-sepolia",
   "contracts": {
-    "sub0": "0x45bec1219aE7442C93CBB32d63Df374d94e1df2A",
-    "predictionVault": "0x37Ad1be17Be247854F9D4F8Af95eeEFFDe0b179E",
-    "conditionalTokens": "0xB01f9A7824fc1ffEF9c428AA8C0225b0e308a4F4",
-    "vault": "0xBc42ECC32C2Da4a9473404dc6549493Aa3684383",
-    "usdc": "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE",
-    "hub": "0x7768784fb990fCFfA221F6beDC76da1f6Ac195A2"
+    "sub0": "0xe647F3Fd30B0B0c5116539E619094A893b1afAa5",
+    "predictionVault": "0x41969450b77F9F2E68b6d7307add43b78dB24d17",
+    "conditionalTokens": "0x9F2Fe6D4666492e62b98276699EaC687cf6ea236",
+    "vault": "0xC8B9167E127AA60E4277A313D07dAa3Fc9df6284",
+    "usdc": "0xA0e874637c3d70dAA6D2B39D3236E408864D7f1c",
+    "hub": "0x835cBEaB650648200D50E5dcc242E2C4D6C66434"
   },
   "eip712": {
     "domainName": "Sub0PredictionVault",

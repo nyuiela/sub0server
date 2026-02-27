@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum AgentStatus {
@@ -348,11 +347,17 @@ model Order {
   status       String   @default("PENDING")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  userId       String?
+  agentId      String?
+  /// CRE execution: for user orders, EIP-712 quote params + userSignature so we can POST to CRE on fill.
+  crePayload   Json?
 
   market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
 
   @@index([marketId])
   @@index([marketId, outcomeIndex])
+  @@index([userId])
+  @@index([agentId])
 }
 
 model News {

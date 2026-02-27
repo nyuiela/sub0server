@@ -10,6 +10,8 @@ import { getPrismaClient } from "../lib/prisma.js";
 import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { createPlatformPositionsForMarket } from "../services/platform-positions.service.js";
 import { generateAgentMarkets } from "../services/agent-market-creation.service.js";
+import { getMarketFromChain } from "../services/cre-pending-markets.js";
+import { getOutcomePositionIds } from "../services/conditional-tokens.service.js";
 import { config } from "../config/index.js";
 import {
   onchainMarketCreatedSchema,
@@ -46,12 +48,28 @@ function serializeMarket(market: {
   };
 }
 
+function rawUsdcToDecimalString(raw: bigint): string {
+  const USDC_DECIMALS = 6;
+  const divisor = BigInt(10 ** USDC_DECIMALS);
+  const intPart = raw / divisor;
+  const fracPart = raw % divisor;
+  const fracStr = fracPart.toString().padStart(USDC_DECIMALS, "0").slice(0, 8);
+  return fracStr === "0".repeat(8) ? intPart.toString() : `${intPart}.${fracStr}`;
+}
+
 async function createMarketFromOnchainResult(
   body: OnchainMarketCreatedInput
 ): Promise<{ market: ReturnType<typeof serializeMarket>; createMarketTxHash: string }> {
   const prisma = getPrismaClient();
+
+  const chainMarket = await getMarketFromChain(body.questionId);
+  if (!chainMarket) {
+    throw new Error("Market not found on chain (getMarket); create and seed first");
+  }
+  const conditionId = chainMarket.conditionId;
+
   const existing = await prisma.market.findUnique({
-    where: { conditionId: body.questionId },
+    where: { conditionId },
   });
   if (existing) {
     return {
@@ -59,38 +77,63 @@ async function createMarketFromOnchainResult(
       createMarketTxHash: body.createMarketTxHash,
     };
   }
-  const resolutionDate = new Date(Date.now() + body.duration * 1000);
+
+  if (!body.seedTxHash) {
+    throw new Error("seedTxHash is required; market must be seeded before persisting");
+  }
+
+  const collateralToken =
+    config.defaultCollateralToken?.trim() &&
+    config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
+      ? config.defaultCollateralToken
+      : "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+  const outcomeCount = chainMarket.outcomeSlotCount;
+  const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
+  if (outcomePositionIds == null) {
+    throw new Error("Could not get CT outcome position IDs");
+  }
+
+  const resolutionDate = new Date(Date.now() + Number(chainMarket.duration) * 1000);
   const outcomes =
-    body.outcomeSlotCount === 2
+    outcomeCount === 2
       ? ["Yes", "No"]
-      : Array.from({ length: body.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`);
+      : Array.from({ length: outcomeCount }, (_, i) => `Outcome ${i + 1}`);
+
+  const initialVolume = rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw);
+  const initialLiquidity = initialVolume;
+
   const market = await prisma.market.create({
     data: {
-      name: body.question,
-      creatorAddress: body.creatorAddress,
+      name: chainMarket.question,
+      creatorAddress: chainMarket.owner,
       context: null,
       outcomes: outcomes as object,
+      outcomePositionIds: outcomePositionIds as object,
       resolutionDate,
-      oracleAddress: body.oracle,
-      collateralToken: config.defaultCollateralToken,
-      conditionId: body.questionId,
+      oracleAddress: chainMarket.oracle,
+      collateralToken,
+      conditionId,
+      questionId: body.questionId,
       platform: "NATIVE",
       agentSource: body.agentSource ?? null,
+      volume: initialVolume,
+      liquidity: initialLiquidity,
     },
   });
-  const outcomeCount = outcomes.length;
-  const outcomePositionIds = market.outcomePositionIds as string[] | null;
+
   await createPlatformPositionsForMarket(
     market.id,
     outcomeCount,
     market.collateralToken,
-    Array.isArray(outcomePositionIds) ? outcomePositionIds : null
+    outcomePositionIds
   );
+
   await broadcastMarketUpdate({
     marketId: market.id,
     reason: MARKET_UPDATE_REASON.CREATED,
-    volume: market.volume.toString(),
+    volume: initialVolume,
   });
+
   return {
     market: serializeMarket(market),
     createMarketTxHash: body.createMarketTxHash,

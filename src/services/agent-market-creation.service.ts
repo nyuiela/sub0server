@@ -374,7 +374,7 @@ export async function filterPayloadsByExistingQuestionId(
   const filtered: CreCreateMarketPayload[] = [];
   for (const p of payloads) {
     const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
-    const existing = await prisma.market.findUnique({
+    const existing = await prisma.market.findFirst({
       where: { questionId: qid },
       select: { id: true },
     });
