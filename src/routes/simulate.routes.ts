@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import { Decimal } from "decimal.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { requireUser } from "../lib/auth.js";
 import { getRedisConnection } from "../lib/redis.js";
+import { upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
+import { CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
 import {
   getTenderlyChainConfig,
   checkFundingEligibility,
@@ -9,6 +12,8 @@ import {
   getNativeBalance,
   getErc20Balance,
 } from "../utils/tenderly/index.js";
+
+const USDC_DECIMALS = 6;
 
 const SIMULATE_FUND_KEY_PREFIX = "simulate-fund:";
 
@@ -82,6 +87,10 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
           getNativeBalance(chain.rpcUrl, walletAddress),
           getErc20Balance(chain.rpcUrl, chain.usdcAddress, walletAddress),
         ]);
+        const usdcDecimal = new Decimal(usdcUnits.toString()).div(
+          Math.pow(10, USDC_DECIMALS)
+        ).toFixed();
+        await upsertAgentChainBalance(agentId, CHAIN_KEY_TENDERLY, usdcDecimal);
         return reply.send({
           nativeWei: nativeWei.toString(),
           usdcUnits: usdcUnits.toString(),
@@ -218,6 +227,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       } catch {
         // in-memory already updated by fundSimulateWallet
       }
+      await upsertAgentChainBalance(agentId, CHAIN_KEY_TENDERLY, "20000");
       return reply.send({
         success: true,
         nativeTxHash: result.nativeTxHash,

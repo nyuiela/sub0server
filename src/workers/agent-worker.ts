@@ -5,8 +5,12 @@ import { Decimal } from "decimal.js";
 import { Worker, type Job } from "bullmq";
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
+import { getAgentBalanceForChain } from "../lib/agent-chain-balance.js";
 import { runTradingAnalysis } from "../services/agent-trading-analysis.service.js";
 import { CRE_PENDING_PUBLIC_KEY, CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
+import type { AgentChainKey } from "../types/agent-chain.js";
+import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
+import { isAgentChainKey } from "../types/agent-chain.js";
 
 const QUEUE_NAME = "agent-prediction";
 const DEFAULT_FOLLOW_UP_AFTER_TRADE_MS = 24 * 60 * 60 * 1000;
@@ -15,6 +19,7 @@ const DEFAULT_FOLLOW_UP_AFTER_SKIP_MS = 60 * 60 * 1000;
 interface AgentJobPayload {
   marketId: string;
   agentId: string;
+  chainKey?: AgentChainKey;
 }
 
 async function submitOrderFromWorker(payload: {
@@ -46,6 +51,24 @@ async function submitOrderFromWorker(payload: {
   });
   const body = await res.json().catch(() => ({}));
   return { ok: res.ok, status: res.status, body };
+}
+
+async function syncAgentBalanceFromBackend(agentId: string): Promise<void> {
+  const apiKey = config.apiKey?.trim();
+  if (!apiKey) return;
+  if (!config.chainRpcUrl?.trim()) return;
+  const url = `${config.backendUrl.replace(/\/$/, "")}/api/agents/${encodeURIComponent(agentId)}/sync-balance`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "x-api-key": apiKey },
+    });
+    if (res.ok) {
+      console.log(`Synced agent balance for ${agentId}`);
+    }
+  } catch (err) {
+    console.error(`Sync balance failed for ${agentId}:`, err);
+  }
 }
 
 function agentHasCompleteWallet(
@@ -180,7 +203,7 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     return;
   }
 
-  const balance = new Decimal(agent.balance.toString());
+  const balance = new Decimal(balanceStr);
   const qty = new Decimal(quantity);
   if (balance.lt(qty)) {
     await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_BALANCE");
@@ -203,6 +226,9 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
       where: { agentId, marketId },
       data: { status: "TRADED", nextRunAt: nextRun },
     });
+    if (chainKey === CHAIN_KEY_MAIN) {
+      void syncAgentBalanceFromBackend(agentId);
+    }
   } else {
     console.error(`Order failed: status=${result.status} body=${JSON.stringify(result.body)}`);
   }

@@ -10,6 +10,7 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:fix-history": "prisma migrate resolve --rolled-back 20260227034618_agent_trading",
     "db:seed": "prisma db seed",
     "test": "vitest run",
     "test:watch": "vitest",

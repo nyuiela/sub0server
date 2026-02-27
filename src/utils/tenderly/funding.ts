@@ -160,7 +160,7 @@ export function checkFundingEligibility(
     eligible: false,
     firstTime: false,
     nextRequestAt: nextAllowed,
-    reason: "You can request simulate funding once per week.",
+    reason: "Requesting test tokens (funding) is limited to once per week. Running simulations is always allowed.",
   };
 }
 

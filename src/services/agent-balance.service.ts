@@ -10,6 +10,8 @@ import contractsData from "../lib/contracts.json" with { type: "json" };
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { broadcastAgentUpdate } from "../lib/broadcast-agent.js";
+import { upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
+import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 
 const contracts = contractsData as {
   contracts?: { usdc?: string };
@@ -136,6 +138,7 @@ export async function syncAgentBalance(agentId: string): Promise<SyncAgentBalanc
     where: { id: agentId },
     data: { balance: chainBalance },
   });
+  await upsertAgentChainBalance(agentId, CHAIN_KEY_MAIN, chainBalance);
 
   await broadcastAgentUpdate({ agentId, balance: chainBalance });
 
