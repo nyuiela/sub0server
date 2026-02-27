@@ -10,6 +10,11 @@
     "usdc": "0xd8b572045391b1D2E1056A0fB16e773c192fAeA6",
     "hub": "0x1d8a4FF7E544b1Dc565C32dDdd3A7f6A631473D7"
   },
+  "platform": {
+    "creatorAddress": "0xf0830060f836B8d54bF02049E5905F619487989e",
+    "oracleAddress": "0x71d35ad20603F82C19BC40420B34C7280d77994b",
+    "usdcAddress": "0xd8b572045391b1D2E1056A0fB16e773c192fAeA6"
+  },
   "eip712": {
     "domainName": "Sub0PredictionVault",
     "domainVersion": "1",

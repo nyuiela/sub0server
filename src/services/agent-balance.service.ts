@@ -45,13 +45,7 @@ function getPublicClient(): ReturnType<typeof createPublicClient> | null {
 }
 
 function getCollateralTokenAddress(): Address {
-  const fromConfig = config.defaultCollateralToken?.trim();
-  if (fromConfig && fromConfig !== "0x0000000000000000000000000000000000000000") {
-    return fromConfig as Address;
-  }
-  const fromContracts = contracts.contracts?.usdc;
-  if (fromContracts) return fromContracts as Address;
-  return "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE" as Address;
+  return contracts.contracts?.usdc as Address;
 }
 
 /**
@@ -76,10 +70,10 @@ export async function getAgentWalletBalanceOnChain(
 ): Promise<string | null> {
   const client = getPublicClient();
   if (!client) return null;
-  const token = tokenAddress ?? getCollateralTokenAddress();
+  const token = getCollateralTokenAddress();
   try {
     const raw = await client.readContract({
-      address: token,
+      address: contracts.contracts?.usdc as Address,
       abi: ERC20_BALANCE_OF_ABI,
       functionName: "balanceOf",
       args: [walletAddress],

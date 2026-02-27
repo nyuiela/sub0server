@@ -1,3 +1,4 @@
+import contracts from "../lib/contracts.json";
 const requiredEnv = (key: string): string => {
   const value = process.env[key];
   if (value === undefined || value === "") {
@@ -133,14 +134,14 @@ function makeConfig() {
     get platformOracleAddress(): string {
       return (
         process.env.PLATFORM_ORACLE_ADDRESS?.trim() ||
-        "0x787AA9f59509Db6Fb37EA37b1cBB7D0D71B116E6"
+        contracts.platform?.oracleAddress
       );
     },
     /** Platform creator address for agent-created markets (CRE signer / Sub0 owner). Must match chain; default matches sub0cre payloads/create-market-payload.json. */
     get platformCreatorAddress(): string {
       return (
         process.env.PLATFORM_CREATOR_ADDRESS?.trim() ||
-        "0xf0830060f836B8d54bF02049E5905F619487989e"
+        contracts.platform?.creatorAddress
       );
     },
     /** Default USDC amount for agent-created market seed (CRE createMarket payload). Matches create-market-payload.json. */
@@ -149,7 +150,7 @@ function makeConfig() {
     },
     /** Default collateral token address for agent-created markets (e.g. USDC). */
     get defaultCollateralToken(): string {
-      return optionalEnv("DEFAULT_COLLATERAL_TOKEN", "0x0000000000000000000000000000000000000000");
+      return optionalEnv("DEFAULT_COLLATERAL_TOKEN", contracts.contracts?.usdc);
     },
     /** RPC URL for Sub0 chain (e.g. Sepolia). When set, CRE pending markets are polled via getMarket(questionId) and persisted. */
     get chainRpcUrl(): string | undefined {
