@@ -78,10 +78,6 @@ async function createMarketFromOnchainResult(
     };
   }
 
-  if (!body.seedTxHash) {
-    throw new Error("seedTxHash is required; market must be seeded before persisting");
-  }
-
   const collateralToken =
     config.defaultCollateralToken?.trim() &&
     config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
@@ -99,7 +95,8 @@ async function createMarketFromOnchainResult(
       ? ["Yes", "No"]
       : Array.from({ length: outcomeCount }, (_, i) => `Outcome ${i + 1}`);
 
-  const initialVolume = rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw);
+  const hasSeedTx = Boolean(body.seedTxHash?.trim());
+  const initialVolume = hasSeedTx ? rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw) : "0";
   const initialLiquidity = initialVolume;
 
   const market = await prisma.market.create({

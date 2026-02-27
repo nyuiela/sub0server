@@ -5,7 +5,7 @@ const agentSourceSchema = z.enum(["gemini", "grok", "openwebui"]).optional();
 export const onchainMarketCreatedSchema = z.object({
   questionId: z.string().min(1),
   createMarketTxHash: z.string().min(1),
-  seedTxHash: z.string().min(1),
+  seedTxHash: z.string().min(1).optional(),
   question: z.string().min(1),
   oracle: z.string().min(1),
   creatorAddress: z.string().min(1),
