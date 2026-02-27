@@ -45,7 +45,7 @@ export async function registerFeedRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/feed", async (req: FastifyRequest<{ Querystring: unknown }>, reply: FastifyReply) => {
     const parsed = feedQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "Invalid query", details: parsed.flatten() });
+      return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
     const { currencies, limit, source } = parsed.data as FeedQueryInput;
     const prisma = getPrismaClient();

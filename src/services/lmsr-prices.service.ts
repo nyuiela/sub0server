@@ -5,6 +5,14 @@
 
 import Decimal from "decimal.js";
 import { getPrismaClient } from "../lib/prisma.js";
+
+interface DecInstance {
+  plus(other: unknown): DecInstance;
+  minus(other: unknown): DecInstance;
+  toFixed(dp?: number): string;
+}
+type DecimalConstructor = new (value: number | string) => DecInstance;
+const Dec = Decimal as unknown as DecimalConstructor;
 import {
   getAllPrices,
   getQuoteForBuy,
@@ -75,10 +83,10 @@ export async function getLmsrStateForMarket(marketId: string): Promise<LmsrMarke
     select: { outcomeIndex: true, side: true, collateralLocked: true },
   });
 
-  const qNum: Decimal[] = Array.from({ length: n }, () => new Decimal(0));
+  const qNum: DecInstance[] = Array.from({ length: n }, () => new Dec(0));
   for (const p of positions) {
     if (p.outcomeIndex < 0 || p.outcomeIndex >= n) continue;
-    const amt = new Decimal(p.collateralLocked.toString());
+    const amt = new Dec(p.collateralLocked.toString());
     if (p.side === "LONG") {
       qNum[p.outcomeIndex] = qNum[p.outcomeIndex].plus(amt);
     } else {

@@ -84,7 +84,7 @@ export async function deliberateAndPersist(
 
   return {
     canResolve,
-    outcomeArray: canResolve ? deliberation.outcomeArray : null,
+    outcomeArray: canResolve && deliberation.outcomeArray != null ? deliberation.outcomeArray : null,
     outcomeString: deliberation.agentA?.outcomeString,
     deliberation,
   };

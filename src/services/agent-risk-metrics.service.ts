@@ -6,6 +6,14 @@ import Decimal from "decimal.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import type { PrismaClient } from "@prisma/client";
 
+interface DecInstance {
+  gt(other: unknown): boolean;
+  minus(other: unknown): DecInstance;
+  toFixed(dp?: number): string;
+}
+type DecimalConstructor = new (value: number | string) => DecInstance;
+const Dec = Decimal as unknown as DecimalConstructor;
+
 /**
  * Recompute maxDrawdown and winRate for an agent from AgentTrack (and optionally Trade) data,
  * then update the Agent record. Use after new trades or track entries.
@@ -21,15 +29,15 @@ export async function calculateAgentRiskMetrics(
     select: { pnl: true },
   });
 
-  let peak = new Decimal(0);
-  let maxDrawdown = new Decimal(0);
+  let peak = new Dec(0);
+  let maxDrawdown = new Dec(0);
   let wins = 0;
   for (let i = 0; i < tracks.length; i++) {
-    const pnl = new Decimal(tracks[i]!.pnl.toString());
+    const pnl = new Dec(tracks[i]!.pnl.toString());
     if (pnl.gt(peak)) peak = pnl;
     const dd = peak.minus(pnl);
     if (dd.gt(maxDrawdown)) maxDrawdown = dd;
-    if (i > 0 && pnl.gt(new Decimal(tracks[i - 1]!.pnl.toString()))) wins++;
+    if (i > 0 && pnl.gt(new Dec(tracks[i - 1]!.pnl.toString()))) wins++;
   }
   const total = tracks.length > 1 ? tracks.length - 1 : 0;
   const winRate = total > 0 ? wins / total : 0;

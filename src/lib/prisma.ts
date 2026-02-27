@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { config } from "../config/index.js";
 
 declare global {
@@ -7,9 +8,10 @@ declare global {
 
 export function getPrismaClient(): PrismaClient {
   if (global.__prisma === undefined) {
-    global.__prisma = new PrismaClient({
-      datasources: { db: { url: config.databaseUrl } },
+    const adapter = new PrismaPg({
+      connectionString: config.databaseUrl,
     });
+    global.__prisma = new PrismaClient({ adapter });
   }
   return global.__prisma;
 }
