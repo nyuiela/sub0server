@@ -29,6 +29,7 @@ import { registerSdkAgentRoutes } from "./routes/sdk-agent.routes.js";
 import { registerSdkApiRoutes } from "./routes/sdk-api.routes.js";
 import { registerSettlementInternalRoutes } from "./routes/settlement-internal.routes.js";
 import { registerCreCallbackRoutes } from "./routes/cre-callback.routes.js";
+import { registerSimulateRoutes } from "./routes/simulate.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
 import { startCreMarketCron, stopCreMarketCron } from "./services/cre-market-cron.js";
 import type { Worker } from "bullmq";
@@ -186,6 +187,7 @@ await registerActivityRoutes(fastify);
 await registerRegisterRoutes(fastify);
 await registerFeedRoutes(fastify);
 await registerSettingsRoutes(fastify);
+await registerSimulateRoutes(fastify);
 
 const start = async () => {
   try {

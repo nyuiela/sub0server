@@ -234,6 +234,43 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(payload);
   });
 
+  /** GET /api/agents/:id/enqueued-markets - List enqueued markets with status and market name (for Discovery). */
+  app.get(
+    "/api/agents/:id/enqueued-markets",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: { limit?: string; offset?: string };
+      }>,
+      reply: FastifyReply
+    ) => {
+      if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
+      const agentId = req.params.id;
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
+      const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
+      const prisma = getPrismaClient();
+      const [rows, total] = await Promise.all([
+        prisma.agentEnqueuedMarket.findMany({
+          where: { agentId },
+          include: { market: { select: { name: true } } },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          skip: offset,
+        }),
+        prisma.agentEnqueuedMarket.count({ where: { agentId } }),
+      ]);
+      const data = rows.map((r) => ({
+        marketId: r.marketId,
+        marketName: (r.market as { name: string })?.name ?? r.marketId,
+        status: r.status,
+        discardReason: r.discardReason ?? undefined,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      }));
+      return reply.send({ data, total, limit, offset });
+    }
+  );
+
   /** Agent wallet status: balance and whether the agent has a complete wallet (address + key). Used for deposit and worker. */
   app.get("/api/agents/:id/wallet-status", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     if (!(await requireAgentOwnerOrApiKey(req, reply))) return;

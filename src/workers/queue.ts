@@ -27,3 +27,12 @@ export async function enqueueAgentPrediction(payload: AgentJobPayload): Promise<
   });
   return job.id ?? "";
 }
+
+/** Add a one-off job to run analysis immediately (manual trigger). */
+export async function enqueueAgentPredictionNow(payload: AgentJobPayload): Promise<string> {
+  const queue = await getAgentQueue();
+  const job = await queue.add("predict", payload, {
+    jobId: `now-${payload.agentId}-${payload.marketId}-${Date.now()}`,
+  });
+  return job.id ?? "";
+}

@@ -32,6 +32,8 @@ export interface TradingDecision {
   outcomeIndex?: number;
   quantity?: string;
   reason?: string;
+  /** When to run analysis again (ms from now). Optional; e.g. 3600000 = 1h, 86400000 = 24h. */
+  nextFollowUpInMs?: number;
 }
 
 function buildPrompt(ctx: AgentMarketContext): string {
@@ -49,15 +51,23 @@ Respond with JSON only, no markdown:
   "action": "skip" | "buy" | "sell",
   "outcomeIndex": 0,
   "quantity": "10",
-  "reason": "one sentence"
+  "reason": "one sentence",
+  "nextFollowUpInMs": 3600000
 }
 - If action is skip, outcomeIndex and quantity can be omitted.
-- If buy or sell: outcomeIndex must be a valid index (0 to ${Math.max(0, ctx.outcomes.length - 1)}), quantity a positive number string (e.g. "5" or "10").`;
+- If buy or sell: outcomeIndex must be a valid index (0 to ${Math.max(0, ctx.outcomes.length - 1)}), quantity a positive number string (e.g. "5" or "10").
+- nextFollowUpInMs (optional): when to re-run analysis (ms from now). E.g. 3600000 = 1h, 86400000 = 24h. Omit for default.`;
 }
 
 function parseTradingResponse(text: string, ctx: AgentMarketContext): TradingDecision {
   const raw = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-  let parsed: { action?: string; outcomeIndex?: number; quantity?: string; reason?: string };
+  let parsed: {
+    action?: string;
+    outcomeIndex?: number;
+    quantity?: string;
+    reason?: string;
+    nextFollowUpInMs?: number;
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch {
@@ -72,11 +82,16 @@ function parseTradingResponse(text: string, ctx: AgentMarketContext): TradingDec
     typeof parsed.quantity === "string" && parsed.quantity.trim() !== ""
       ? String(Number(parsed.quantity) || 0)
       : undefined;
+  const nextFollowUpInMs =
+    typeof parsed.nextFollowUpInMs === "number" && parsed.nextFollowUpInMs > 0
+      ? Math.min(parsed.nextFollowUpInMs, 7 * 24 * 3600 * 1000)
+      : undefined;
   return {
     action,
     outcomeIndex,
     quantity: quantity && Number(quantity) > 0 ? quantity : undefined,
     reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 500) : undefined,
+    nextFollowUpInMs,
   };
 }
 

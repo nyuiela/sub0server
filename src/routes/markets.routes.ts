@@ -79,17 +79,22 @@ function withListStats(
 }
 
 export async function registerMarketRoutes(app: FastifyInstance): Promise<void> {
+  /** GET /api/markets - List markets. Public (no auth required); safe for listing open markets. */
   app.get("/api/markets", async (req: FastifyRequest<{ Querystring: MarketQueryInput }>, reply: FastifyReply) => {
     const parsed = marketQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
-    const { status, creatorAddress, platform, limit, offset } = parsed.data;
+    const { status, creatorAddress, platform, limit, offset, createdAtFrom, createdAtTo } = parsed.data;
     const prisma = getPrismaClient();
+    const dateFilter: Prisma.DateTimeFilter = {};
+    if (createdAtFrom) dateFilter.gte = new Date(createdAtFrom);
+    if (createdAtTo) dateFilter.lte = new Date(createdAtTo);
     const where: Prisma.MarketWhereInput = {
       ...(status ? { status } : {}),
       ...(creatorAddress ? { creatorAddress } : {}),
       ...(platform ? { platform } : {}),
+      ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
     };
     const [markets, total] = await Promise.all([
       prisma.market.findMany({
