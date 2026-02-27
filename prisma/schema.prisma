@@ -147,11 +147,16 @@ model PendingAgentTrade {
 }
 
 /// Markets enqueued for an agent (add-to-agent on Markets page). Used to show "Added (N)" and persist across sessions.
+/// status: PENDING until agent runs; DISCARDED when agent skips (with discardReason); TRADED when order submitted.
 model AgentEnqueuedMarket {
-  id        String   @id @default(uuid())
-  agentId   String
-  marketId  String
-  createdAt DateTime @default(now())
+  id             String    @id @default(uuid())
+  agentId        String
+  marketId       String
+  status         String    @default("PENDING") // PENDING | DISCARDED | TRADED
+  discardReason  String?   @db.Text
+  nextRunAt      DateTime? // when to run analysis again (agent/cron); null = run on next tick
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
 
   agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
   market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)

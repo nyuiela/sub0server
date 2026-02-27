@@ -38,6 +38,10 @@ export const marketQuerySchema = z.object({
   platform: marketPlatformEnum.optional(),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
+  /** ISO date string; markets created on or after this (Simulate date filter). */
+  createdAtFrom: z.string().optional(),
+  /** ISO date string; markets created before this; also agent info cutoff for Simulate. */
+  createdAtTo: z.string().optional(),
 });
 
 export type MarketCreateInput = z.infer<typeof marketCreateSchema>;

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { enqueueAgentPrediction } from "../workers/queue.js";
+import { enqueueAgentPrediction, enqueueAgentPredictionNow } from "../workers/queue.js";
 import { getPrismaClient } from "../lib/prisma.js";
-import { requireAgentOwnerOrApiKeyById, requireUserOrApiKey } from "../lib/permissions.js";
+import { requireAgentOwnerOrApiKeyById, requireUserOrApiKey, requireApiKeyOnly } from "../lib/permissions.js";
 
 interface EnqueueBody {
   marketId: string;
@@ -44,5 +44,44 @@ export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<
       where: { agentId, marketId },
     });
     return reply.code(204).send();
+  });
+
+  /** POST /api/agent/:id/trigger - Manually trigger analysis for all enqueued markets (one-off jobs run soon). */
+  app.post<{ Params: { id: string } }>("/api/agent/:id/trigger", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    if (!requireUserOrApiKey(req, reply)) return;
+    const agentId = req.params.id?.trim();
+    if (!agentId) return reply.code(400).send({ error: "Agent id required" });
+    if (!(await requireAgentOwnerOrApiKeyById(req, reply, agentId))) return;
+    const prisma = getPrismaClient();
+    const rows = await prisma.agentEnqueuedMarket.findMany({
+      where: { agentId },
+      select: { marketId: true },
+    });
+    const jobIds: string[] = [];
+    for (const row of rows) {
+      const jobId = await enqueueAgentPredictionNow({ agentId, marketId: row.marketId });
+      jobIds.push(jobId);
+    }
+    return reply.send({ triggered: jobIds.length, jobIds });
+  });
+
+  /** POST /api/agent/trigger-all - Cron-only: enqueue one-off analysis for all enqueued markets (all agents). Requires API key. */
+  app.post("/api/agent/trigger-all", async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!requireApiKeyOnly(req, reply)) return;
+    const prisma = getPrismaClient();
+    const now = new Date();
+    const rows = await prisma.agentEnqueuedMarket.findMany({
+      where: {
+        status: { in: ["PENDING", "TRADED"] },
+        OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
+      },
+      select: { agentId: true, marketId: true },
+    });
+    const jobIds: string[] = [];
+    for (const row of rows) {
+      const jobId = await enqueueAgentPredictionNow({ agentId: row.agentId, marketId: row.marketId });
+      jobIds.push(jobId);
+    }
+    return reply.send({ triggered: jobIds.length, jobIds });
   });
 }

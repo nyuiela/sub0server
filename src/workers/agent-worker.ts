@@ -9,6 +9,8 @@ import { runTradingAnalysis } from "../services/agent-trading-analysis.service.j
 import { CRE_PENDING_PUBLIC_KEY, CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
 
 const QUEUE_NAME = "agent-prediction";
+const DEFAULT_FOLLOW_UP_AFTER_TRADE_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_FOLLOW_UP_AFTER_SKIP_MS = 60 * 60 * 1000;
 
 interface AgentJobPayload {
   marketId: string;
@@ -89,7 +91,11 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
   }
 
   const prisma = getPrismaClient();
-  const [agent, market] = await Promise.all([
+  const [enqueued, agent, market] = await Promise.all([
+    prisma.agentEnqueuedMarket.findUnique({
+      where: { agentId_marketId: { agentId, marketId } },
+      select: { nextRunAt: true },
+    }),
     prisma.agent.findUnique({
       where: { id: agentId },
       select: {
@@ -112,6 +118,11 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
 
   if (!agent || !market) {
     console.log(`Agent or market not found; skipping`);
+    return;
+  }
+  const nextRunAt = enqueued?.nextRunAt;
+  if (nextRunAt && nextRunAt.getTime() > Date.now()) {
+    console.log(`Market ${marketId} nextRunAt not yet due; skipping`);
     return;
   }
   if (agent.status !== "ACTIVE") {
@@ -142,6 +153,16 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
 
   if (decision.action === "skip") {
     console.log(`Decision: skip. ${decision.reason ?? ""}`);
+    const followUpMs = decision.nextFollowUpInMs ?? DEFAULT_FOLLOW_UP_AFTER_SKIP_MS;
+    const nextRun = new Date(Date.now() + followUpMs);
+    await prisma.agentEnqueuedMarket.updateMany({
+      where: { agentId, marketId },
+      data: {
+        status: "DISCARDED",
+        discardReason: decision.reason?.slice(0, 2000) ?? null,
+        nextRunAt: followUpMs > 0 ? nextRun : null,
+      },
+    });
     return;
   }
 
@@ -176,6 +197,12 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
 
   if (result.ok) {
     console.log(`Order submitted: ${side} outcomeIndex=${outcomeIndex} quantity=${quantity}`);
+    const followUpMs = decision.nextFollowUpInMs ?? DEFAULT_FOLLOW_UP_AFTER_TRADE_MS;
+    const nextRun = new Date(Date.now() + followUpMs);
+    await prisma.agentEnqueuedMarket.updateMany({
+      where: { agentId, marketId },
+      data: { status: "TRADED", nextRunAt: nextRun },
+    });
   } else {
     console.error(`Order failed: status=${result.status} body=${JSON.stringify(result.body)}`);
   }

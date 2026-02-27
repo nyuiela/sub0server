@@ -1,0 +1,61 @@
+# Redis + backend + agent-worker for Simulate / Run analysis.
+# Run from sub0server: docker compose up -d
+# Set .env with DATABASE_URL, REDIS_URL, JWT_SECRET, API_KEY, AGENT_TRADING_ENABLED=true, etc.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  backend:
+    build: .
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    depends_on:
+      redis: { condition: service_healthy }
+    command: ["node", "dist/server.js"]
+
+  agent-worker:
+    build: .
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      BACKEND_URL: http://backend:4000
+      AGENT_TRADING_ENABLED: "true"
+    depends_on:
+      redis: { condition: service_healthy }
+      backend: { condition: service_started }
+    command: ["node", "dist/workers/agent-worker.js"]
+    restart: unless-stopped
+
+  # Optional: cron triggers analysis for all agents every 5 minutes (enqueues jobs; agent-worker processes them).
+  # Requires API_KEY in .env. Disable if you rely on repeat-every-60s enqueue or manual "Run analysis" only.
+  agent-cron:
+    image: alpine:3.19
+    env_file: .env
+    environment:
+      BACKEND_URL: http://backend:4000
+      CRON_SCHEDULE: "*/5 * * * *"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache curl
+        while true; do
+          sleep 300
+          curl -sf -X POST "$${BACKEND_URL}/api/agent/trigger-all" -H "x-api-key: $${API_KEY}" || true
+        done
+    depends_on:
+      backend: { condition: service_started }
+    restart: unless-stopped
+    profiles:
+      - cron
