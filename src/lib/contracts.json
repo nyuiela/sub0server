@@ -3,17 +3,17 @@
   "chainRpcUrl": "https://sepolia.drpc.org",
   "chainSelectorName": "ethereum-testnet-sepolia",
   "contracts": {
-    "sub0": "0xf62CcEBD5Fc1a0189c9cEc9f452B6aC1452fFbfD",
-    "predictionVault": "0xf7Cf4c775F26aB0cC6161268F5c79A5F4Fa9f5F3",
-    "conditionalTokens": "0x7C26E296335e870DC12B224F4710c3c538572C4b",
-    "vault": "0x5C4436CEAB0C7249E0cb779c8809c3C289D0Dd3D",
-    "usdc": "0xd8b572045391b1D2E1056A0fB16e773c192fAeA6",
-    "hub": "0x1d8a4FF7E544b1Dc565C32dDdd3A7f6A631473D7"
+    "sub0": "0xF5CdCaf95BB27FB43919d1c664a2618c773330dd",
+    "predictionVault": "0xFC4DEF105b3288E41f0aE8818bDD48d58F950772",
+    "conditionalTokens": "0xff6F3af86bF0f010f1a72Ba9C6be7bf22162D330",
+    "vault": "0x018Baf94BF57EF4b62C510A94c1C35fA1C786A7d",
+    "usdc": "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF",
+    "hub": "0x1f8eCAB9EDD176AD32B523013F8192335b96A6c8"
   },
   "platform": {
     "creatorAddress": "0xf0830060f836B8d54bF02049E5905F619487989e",
-    "oracleAddress": "0x71d35ad20603F82C19BC40420B34C7280d77994b",
-    "usdcAddress": "0xd8b572045391b1D2E1056A0fB16e773c192fAeA6"
+    "oracleAddress": "0x4fd81EfC19A5Af3E9eAd9c147e5E9cF3CF823DE2",
+    "usdcAddress": "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF"
   },
   "eip712": {
     "domainName": "Sub0PredictionVault",
