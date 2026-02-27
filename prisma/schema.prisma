@@ -258,9 +258,12 @@ model Market {
   oracleAddress       String
   status              MarketStatus    @default(OPEN)
   collateralToken     String
-  conditionId         String          @unique
-  /** On-chain questionId (keccak256(encodePacked(question, creator, oracle))). Used to dedupe and poll CRE-created markets. */
+  /** Set when market is on-chain; null for drafts (not yet created on-chain). */
+  conditionId         String?         @unique
+  /** On-chain questionId (keccak256(encodePacked(question, creator, oracle))). Null for drafts; set when on-chain. Markets without questionId are not listable. */
   questionId          String?         @unique
+  /** Tx hash of create(Market) when created via CRE. Audit only. */
+  createMarketTxHash  String?
   platform            MarketPlatform  @default(NATIVE)
   /** Which AI agent created this market (e.g. gemini, grok). Internal only; not exposed on public API. */
   agentSource         String?        // gemini | grok

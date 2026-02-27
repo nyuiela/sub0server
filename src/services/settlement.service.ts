@@ -13,7 +13,7 @@ import type {
 export interface MarketForSettlement {
   id: string;
   name: string;
-  conditionId: string;
+  conditionId: string | null;
   resolutionDate: Date;
   status: string;
   outcomes: unknown;
@@ -28,6 +28,7 @@ export async function findMarketsDueForSettlement(limit: number = 10): Promise<M
   const now = new Date();
   const markets = await prisma.market.findMany({
     where: {
+      questionId: { not: null },
       status: "OPEN",
       resolutionDate: { lt: now },
     },

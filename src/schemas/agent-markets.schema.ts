@@ -14,6 +14,8 @@ export const onchainMarketCreatedSchema = z.object({
   oracleType: z.number().int().min(0),
   marketType: z.number().int().min(0),
   agentSource: agentSourceSchema,
+  /** When set, backend updates this draft market (by id) instead of creating; from CRE callback. */
+  marketId: z.string().uuid().optional(),
 });
 
 export type OnchainMarketCreatedInput = z.infer<typeof onchainMarketCreatedSchema>;

@@ -44,7 +44,7 @@ function serializeMarket(market: {
   oracleAddress: string;
   status: string;
   collateralToken: string;
-  conditionId: string;
+  conditionId: string | null;
   platform?: string;
   liquidity?: { toString(): string } | null;
   confidence?: number | null;
@@ -91,6 +91,7 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     if (createdAtFrom) dateFilter.gte = new Date(createdAtFrom);
     if (createdAtTo) dateFilter.lte = new Date(createdAtTo);
     const where: Prisma.MarketWhereInput = {
+      questionId: { not: null },
       ...(status ? { status } : {}),
       ...(creatorAddress ? { creatorAddress } : {}),
       ...(platform ? { platform } : {}),
@@ -144,6 +145,7 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       },
     });
     if (!market) return reply.code(404).send({ error: "Market not found" });
+    if (market.questionId == null) return reply.code(404).send({ error: "Market not found", message: "Market is not yet on-chain and not listable" });
     const [statsMap, positionIds, orderBook] = await Promise.all([
       getMarketStatsBatch([market.id]),
       getMarketPositionIds(market.id),

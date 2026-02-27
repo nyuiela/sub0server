@@ -8,9 +8,14 @@
 
 import type { FastifyBaseLogger } from "fastify";
 import { config } from "../config/index.js";
-import type { CreCreateMarketPayload } from "../types/agent-markets.js";
-import { generateAgentMarkets, filterPayloadsByExistingQuestionId } from "./agent-market-creation.service.js";
+import {
+  getDraftMarketsForCre,
+  createDraftMarketsFromAgents,
+  filterPayloadsByExistingQuestionId,
+  generateAgentMarkets,
+} from "./agent-market-creation.service.js";
 import { addPending, runPoll } from "./cre-pending-markets.js";
+import type { CreCreateMarketPayload, CreDraftPayloadForCre } from "../types/agent-markets.js";
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -29,18 +34,21 @@ async function triggerCreateMarketsFromBackend(log: FastifyBaseLogger): Promise<
   }
   if (config.creMarketCronBatchPayload) {
     try {
-      const count = config.agentMarketsPerJob;
-      const payloads = await generateAgentMarkets(count);
-      const filtered = await filterPayloadsByExistingQuestionId(payloads);
-      if (filtered.length > 0) {
-        body.markets = filtered;
+      const limit = config.agentMarketsPerJob;
+      let drafts = await getDraftMarketsForCre(limit);
+      if (drafts.length === 0) {
+        const { created } = await createDraftMarketsFromAgents(limit);
+        if (created > 0) drafts = await getDraftMarketsForCre(limit);
+      }
+      if (drafts.length > 0) {
+        body.markets = drafts;
         log.info(
-          { count: filtered.length, skipped: payloads.length - filtered.length },
-          "CRE cron sending markets in body (batch create)"
+          { count: drafts.length },
+          "CRE cron sending draft markets in body (batch create with marketId)"
         );
       }
     } catch (err) {
-      log.warn({ err }, "Agent market generation failed; CRE will fetch via GET (cap 4)");
+      log.warn({ err }, "Draft market fetch/create failed; CRE will fetch via GET (cap 4)");
     }
   }
   try {
@@ -53,7 +61,7 @@ async function triggerCreateMarketsFromBackend(log: FastifyBaseLogger): Promise<
     if (res.ok) {
       const sent = (body.markets as unknown[] | undefined) ?? [];
       if (Array.isArray(sent) && sent.length > 0) {
-        addPending(sent as CreCreateMarketPayload[]);
+        addPending(sent as (CreCreateMarketPayload | CreDraftPayloadForCre)[]);
       }
       log.info({ status: res.status }, "CRE createMarketsFromBackend triggered");
     } else {

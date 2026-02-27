@@ -16,6 +16,7 @@ import { getPrismaClient } from "../lib/prisma.js";
 import type {
   AgentMarketSuggestion,
   CreCreateMarketPayload,
+  CreDraftPayloadForCre,
   AgentSource,
 } from "../types/agent-markets.js";
 
@@ -26,8 +27,40 @@ const MARKET_TYPE_PUBLIC = 1;
 const MAX_QUESTION_LENGTH = 256;
 const CURRENT_YEAR = new Date().getFullYear();
 
+const MARKET_CATEGORIES = [
+  "entertainment",
+  "movies",
+  "TV and series",
+  "music",
+  "sports",
+  "tech",
+  "AI and AI companies",
+  "stocks and finance",
+  "crypto",
+  "politics",
+  "social media and influencers",
+  "viral and trending topics",
+  "news and world events",
+  "science",
+  "gaming",
+  "business and startups",
+  "culture and awards",
+  "space and science",
+] as const;
+
+function pickRandomCategories(n: number): string[] {
+  const shuffled = [...MARKET_CATEGORIES].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(n, shuffled.length));
+}
+
 function buildSystemPrompt(): string {
+  const categoryList = MARKET_CATEGORIES.join(", ");
   return `You are a prediction market question generator. Your task is to output a JSON array of market questions.
+
+VARIETY (IMPORTANT):
+- Each question in your response MUST be from a DIFFERENT category. Do not generate multiple questions about the same topic area.
+- Spread questions across many categories. Use a mix of: ${categoryList}.
+- Avoid repeating the same type of market (e.g. do not output several sports or several tech questions in one response). Vary widely.
 
 STRICT RULES:
 - Use ONLY the current year (${CURRENT_YEAR}) in any date or time reference. Do not use past years.
@@ -39,15 +72,20 @@ STRICT RULES:
 OUTPUT FORMAT:
 - You MUST respond with a SINGLE JSON array. Each element is an object with:
   - "question": string (required). Clear prediction question. Max ${MAX_QUESTION_LENGTH} chars.
+  - "context": string (optional). One short sentence describing the market topic or resolution criteria. Max 256 chars.
   - "durationSeconds": number (optional). Seconds until resolution. Default ${DEFAULT_DURATION_SECONDS}.
   - "outcomeSlotCount": number (optional). 2 for binary. Default ${DEFAULT_OUTCOME_SLOT_COUNT}.
 - Output MUST be valid JSON only. No markdown, no code fences, no prose before or after.
-- Minified (one line) preferred. Property order: "question" first, then "durationSeconds", then "outcomeSlotCount".
+- Minified (one line) preferred. Property order: "question" first, then "context", then "durationSeconds", then "outcomeSlotCount".
 - Generate exactly the number of items requested (or up to 10 if not specified).`;
 }
 
-function buildUserPrompt(count: number): string {
-  return `Generate exactly ${count} prediction market questions following the rules. Return only the JSON array.`;
+function buildUserPrompt(count: number, emphasisCategories?: string[]): string {
+  if (emphasisCategories != null && emphasisCategories.length > 0) {
+    const list = emphasisCategories.join(", ");
+    return `Generate exactly ${count} prediction market questions. For this batch you MUST include at least one question from each of these categories: ${list}. Spread the remaining questions across other categories (entertainment, sports, tech, music, stocks, news, etc.). Return only the JSON array.`;
+  }
+  return `Generate exactly ${count} prediction market questions. Ensure each question is from a different category (sports, tech, entertainment, movies, music, stocks, politics, viral topics, etc.). Return only the JSON array.`;
 }
 
 async function callGemini(count: number): Promise<AgentMarketSuggestion[]> {
@@ -60,17 +98,18 @@ async function callGemini(count: number): Promise<AgentMarketSuggestion[]> {
 
   const model = getNextGeminiModelListing();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const emphasis = pickRandomCategories(4);
   const body = {
     contents: [
       {
         role: "user",
         parts: [
-          { text: buildSystemPrompt() + "\n\n" + buildUserPrompt(count) },
+          { text: buildSystemPrompt() + "\n\n" + buildUserPrompt(count, emphasis) },
         ],
       },
     ],
     generationConfig: {
-      temperature: 0.7,
+      temperature: 0.85,
       maxOutputTokens: 8192,
       responseMimeType: "application/json",
     },
@@ -134,6 +173,7 @@ async function callOpenWebUI(count: number): Promise<AgentMarketSuggestion[]> {
   const apiKey = config.openWebUiApiKey;
   if (!baseUrl) return [];
 
+  const emphasis = pickRandomCategories(4);
   const url = `${baseUrl}/api/chat/completions`;
   const body = {
     stream: false,
@@ -141,7 +181,7 @@ async function callOpenWebUI(count: number): Promise<AgentMarketSuggestion[]> {
     messages: [
       {
         role: "user" as const,
-        content: buildSystemPrompt() + "\n\n" + buildUserPrompt(count),
+        content: buildSystemPrompt() + "\n\n" + buildUserPrompt(count, emphasis),
       },
     ],
   };
@@ -181,6 +221,7 @@ async function callGrok(count: number): Promise<AgentMarketSuggestion[]> {
 
   const model = getNextGrokModel();
   const url = "https://api.x.ai/v1/chat/completions";
+  const emphasis = pickRandomCategories(4);
   const body = {
     model,
     messages: [
@@ -189,11 +230,11 @@ async function callGrok(count: number): Promise<AgentMarketSuggestion[]> {
         content:
           buildSystemPrompt() +
           "\n\n" +
-          buildUserPrompt(count),
+          buildUserPrompt(count, emphasis),
       },
     ],
     max_tokens: 8192,
-    temperature: 0.7,
+    temperature: 0.85,
   };
 
   const res = await fetch(url, {
@@ -242,16 +283,15 @@ function parseSuggestionsFromText(text: string): AgentMarketSuggestion[] {
     if (item == null || typeof item !== "object") continue;
     const q = (item as Record<string, unknown>).question;
     if (typeof q !== "string" || !q.trim()) continue;
+    const raw = item as Record<string, unknown>;
+    const ctx = typeof raw.context === "string" ? raw.context.trim().slice(0, 256) : undefined;
     suggestions.push({
       question: q.trim().slice(0, MAX_QUESTION_LENGTH),
+      context: ctx && ctx.length > 0 ? ctx : undefined,
       durationSeconds:
-        typeof (item as Record<string, unknown>).durationSeconds === "number"
-          ? ((item as Record<string, unknown>).durationSeconds as number)
-          : undefined,
+        typeof raw.durationSeconds === "number" ? (raw.durationSeconds as number) : undefined,
       outcomeSlotCount:
-        typeof (item as Record<string, unknown>).outcomeSlotCount === "number"
-          ? ((item as Record<string, unknown>).outcomeSlotCount as number)
-          : undefined,
+        typeof raw.outcomeSlotCount === "number" ? (raw.outcomeSlotCount as number) : undefined,
     });
   }
   return suggestions;
@@ -296,6 +336,7 @@ function toCrePayload(
     creatorAddress: config.platformCreatorAddress,
     agentSource,
     amountUsdc: config.agentMarketAmountUsdc,
+    context: suggestion.context,
   };
 }
 
@@ -381,4 +422,111 @@ export async function filterPayloadsByExistingQuestionId(
     if (!existing) filtered.push(p);
   }
   return filtered;
+}
+
+const DEFAULT_COLLATERAL =
+  "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+
+/** DiceBear URL for market image; seed must be alphanumeric. Uses market id for unique image per market. */
+function marketImageUrl(seed: string): string {
+  const safe = seed.replace(/^0x/, "").replace(/[^a-zA-Z0-9]/g, "a").slice(0, 32) || "default";
+  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(safe)}`;
+}
+
+/**
+ * Creates draft markets in the DB from agent suggestions (no conditionId/questionId).
+ * Call this to refill the draft pool; then send drafts to CRE via getDraftMarketsForCre.
+ */
+export async function createDraftMarketsFromAgents(
+  count: number
+): Promise<{ created: number }> {
+  if (count < 1) return { created: 0 };
+  const payloads = await generateAgentMarkets(count);
+  if (payloads.length === 0) return { created: 0 };
+  const prisma = getPrismaClient();
+  const collateralToken =
+    config.defaultCollateralToken?.trim() &&
+    config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
+      ? config.defaultCollateralToken
+      : DEFAULT_COLLATERAL;
+  let created = 0;
+  for (const p of payloads) {
+    const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
+    const existing = await prisma.market.findFirst({
+      where: { questionId: qid },
+      select: { id: true },
+    });
+    if (existing) continue;
+    const resolutionDate = new Date(Date.now() + p.duration * 1000);
+    const outcomes =
+      p.outcomeSlotCount === 2
+        ? (["Yes", "No"] as object)
+        : (Array.from({ length: p.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`) as object);
+    const market = await prisma.market.create({
+      data: {
+        name: p.question,
+        creatorAddress: p.creatorAddress,
+        oracleAddress: p.oracle,
+        resolutionDate,
+        outcomes,
+        collateralToken,
+        platform: "NATIVE",
+        agentSource: p.agentSource ?? null,
+        volume: 0,
+        conditionId: null,
+        questionId: null,
+        context: p.context ?? null,
+      },
+    });
+    await prisma.market.update({
+      where: { id: market.id },
+      data: { imageUrl: marketImageUrl(market.id) },
+    });
+    created++;
+  }
+  return { created };
+}
+
+/**
+ * Returns draft markets (questionId null) as payloads for CRE.
+ * Contract fields + marketId only (no agentSource). CRE echoes marketId in callback for update.
+ */
+export async function getDraftMarketsForCre(
+  limit: number
+): Promise<CreDraftPayloadForCre[]> {
+  if (limit < 1) return [];
+  const prisma = getPrismaClient();
+  const drafts = await prisma.market.findMany({
+    where: { questionId: null },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+    select: {
+      id: true,
+      name: true,
+      oracleAddress: true,
+      creatorAddress: true,
+      resolutionDate: true,
+      outcomes: true,
+    },
+  });
+  const now = Date.now();
+  return drafts.map((m) => {
+    const outcomes = m.outcomes as unknown[];
+    const outcomeSlotCount = Array.isArray(outcomes) ? outcomes.length : 2;
+    const duration = Math.max(
+      1,
+      Math.floor((m.resolutionDate.getTime() - now) / 1000)
+    );
+    return {
+      marketId: m.id,
+      question: m.name,
+      oracle: m.oracleAddress,
+      creatorAddress: m.creatorAddress,
+      duration,
+      outcomeSlotCount,
+      oracleType: ORACLE_TYPE_PLATFORM,
+      marketType: MARKET_TYPE_PUBLIC,
+      amountUsdc: config.agentMarketAmountUsdc,
+    };
+  });
 }

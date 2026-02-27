@@ -14,7 +14,7 @@ import { createPlatformPositionsForMarket } from "./platform-positions.service.j
 import { broadcastMarketUpdate, MARKET_UPDATE_REASON } from "../lib/broadcast-market.js";
 import { seedMarketLiquidityOnChain } from "./seed-market-liquidity.service.js";
 import { getOutcomePositionIds } from "./conditional-tokens.service.js";
-import type { CreCreateMarketPayload } from "../types/agent-markets.js";
+import type { CreCreateMarketPayload, CreDraftPayloadForCre } from "../types/agent-markets.js";
 
 const USDC_DECIMALS = 6;
 
@@ -36,6 +36,8 @@ interface PendingItem {
   marketType: number;
   agentSource?: string;
   sentAt: number;
+  /** When set, poll will update this draft market instead of creating new. */
+  marketId?: string;
 }
 
 const pending: PendingItem[] = [];
@@ -81,7 +83,9 @@ function getClient(): ReturnType<typeof createPublicClient> | null {
   return publicClient;
 }
 
-export function addPending(payloads: CreCreateMarketPayload[]): void {
+export function addPending(
+  payloads: (CreCreateMarketPayload | CreDraftPayloadForCre)[]
+): void {
   const now = Date.now();
   for (const p of payloads) {
     const questionId = computeQuestionId(p.question, p.creatorAddress, p.oracle) as Hex;
@@ -94,8 +98,9 @@ export function addPending(payloads: CreCreateMarketPayload[]): void {
       outcomeSlotCount: p.outcomeSlotCount,
       oracleType: p.oracleType,
       marketType: p.marketType,
-      agentSource: p.agentSource,
+      agentSource: "agentSource" in p ? p.agentSource : undefined,
       sentAt: now,
+      marketId: "marketId" in p ? p.marketId : undefined,
     });
   }
 }
@@ -172,7 +177,48 @@ async function persistMarketFromChain(
 ): Promise<void> {
   const prisma = getPrismaClient();
   const conditionId = chainMarket.conditionId as string;
-  const existing = await prisma.market.findUnique({
+
+  if (item.marketId) {
+    const draft = await prisma.market.findUnique({
+      where: { id: item.marketId },
+      select: { id: true, questionId: true, collateralToken: true },
+    });
+    if (draft && draft.questionId == null) {
+      const outcomeCount = Number(chainMarket.outcomeSlotCount);
+      const collateralToken =
+        config.defaultCollateralToken?.trim() &&
+        config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
+          ? config.defaultCollateralToken
+          : (contractsData as { contracts?: { usdc?: string } }).contracts?.usdc ??
+            "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+      const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
+      if (outcomePositionIds != null) {
+        await prisma.market.update({
+          where: { id: item.marketId },
+          data: {
+            conditionId,
+            questionId: item.questionId,
+            outcomePositionIds: outcomePositionIds as object,
+          },
+        });
+        await createPlatformPositionsForMarket(
+          item.marketId,
+          outcomeCount,
+          draft.collateralToken,
+          outcomePositionIds
+        );
+        await broadcastMarketUpdate({
+          marketId: item.marketId,
+          reason: MARKET_UPDATE_REASON.CREATED,
+          volume: "0",
+        });
+      }
+      removePending(item.questionId);
+      return;
+    }
+  }
+
+  const existing = await prisma.market.findFirst({
     where: { conditionId },
     select: { id: true },
   });

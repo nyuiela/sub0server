@@ -8,6 +8,8 @@ export interface AgentMarketSuggestion {
   question: string;
   durationSeconds?: number;
   outcomeSlotCount?: number;
+  /** Optional short context/description; stored on Market.context. */
+  context?: string;
 }
 
 /** Which AI agent generated the market; stored on Market.agentSource, not exposed on public API. */
@@ -30,6 +32,26 @@ export interface CreCreateMarketPayload {
   agentSource?: AgentSource;
   amountUsdc?: string;
   apiKey?: string;
+  /** Backend market id (draft); CRE echoes in callback so backend can update by id. */
+  marketId?: string;
+  /** Optional short context; stored on Market.context (not sent to CRE). */
+  context?: string;
+}
+
+/**
+ * Payload sent to CRE for create (contract fields + marketId only; no agentSource).
+ * Used when sending draft markets from DB so callback can update by marketId.
+ */
+export interface CreDraftPayloadForCre {
+  marketId: string;
+  question: string;
+  oracle: string;
+  creatorAddress: string;
+  duration: number;
+  outcomeSlotCount: number;
+  oracleType: number;
+  marketType: number;
+  amountUsdc?: string;
 }
 
 /**
