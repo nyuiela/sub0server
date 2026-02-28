@@ -4,6 +4,7 @@ import { getPrismaClient } from "../lib/prisma.js";
 import { requireAgentOwnerOrApiKeyById, requireUserOrApiKey, requireApiKeyOnly } from "../lib/permissions.js";
 import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 import { isAgentChainKey } from "../types/agent-chain.js";
+import { config } from "../config/index.js";
 
 interface EnqueueBody {
   marketId: string;
@@ -72,13 +73,50 @@ export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<
     return reply.send({ triggered: jobIds.length, jobIds });
   });
 
-  /** POST /api/agent/trigger-all - Cron-only: enqueue one-off analysis for all enqueued markets (all agents). Requires API key. */
+  /** POST /api/agent/trigger-all - Cron-only: (1) discovery: fetch OPEN markets and enqueue new for each agent (main). (2) Enqueue one-off analysis for all due enqueued markets on MAIN. Simulate is button-only. Requires API key. */
   app.post("/api/agent/trigger-all", async (req: FastifyRequest, reply: FastifyReply) => {
     if (!requireApiKeyOnly(req, reply)) return;
     const prisma = getPrismaClient();
+    let discovered = 0;
+    if (config.agentDiscoveryEnabled) {
+      const openMarkets = await prisma.market.findMany({
+        where: { status: "OPEN", questionId: { not: null } },
+        take: config.agentDiscoveryMarketsLimit,
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      const openMarketIds = openMarkets.map((m) => m.id);
+      const agents = await prisma.agent.findMany({
+        where: { status: "ACTIVE" },
+        select: { id: true },
+      });
+      const maxNew = config.agentDiscoveryMaxNewPerAgentPerRun;
+      for (const agent of agents) {
+        const existing = await prisma.agentEnqueuedMarket.findMany({
+          where: { agentId: agent.id, chainKey: CHAIN_KEY_MAIN },
+          select: { marketId: true },
+        });
+        const existingSet = new Set(existing.map((r) => r.marketId));
+        let added = 0;
+        for (const marketId of openMarketIds) {
+          if (added >= maxNew) break;
+          if (existingSet.has(marketId)) continue;
+          await enqueueAgentPrediction({ marketId, agentId: agent.id, chainKey: CHAIN_KEY_MAIN });
+          await prisma.agentEnqueuedMarket.upsert({
+            where: { agentId_marketId: { agentId: agent.id, marketId } },
+            create: { agentId: agent.id, marketId, chainKey: CHAIN_KEY_MAIN },
+            update: { chainKey: CHAIN_KEY_MAIN },
+          });
+          existingSet.add(marketId);
+          added++;
+          discovered++;
+        }
+      }
+    }
     const now = new Date();
     const rows = await prisma.agentEnqueuedMarket.findMany({
       where: {
+        chainKey: CHAIN_KEY_MAIN,
         status: { in: ["PENDING", "TRADED"] },
         OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
       },
@@ -90,6 +128,6 @@ export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<
       const jobId = await enqueueAgentPredictionNow({ agentId: row.agentId, marketId: row.marketId, chainKey });
       jobIds.push(jobId);
     }
-    return reply.send({ triggered: jobIds.length, jobIds });
+    return reply.send({ discovered, triggered: jobIds.length, jobIds });
   });
 }

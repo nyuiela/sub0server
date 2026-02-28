@@ -309,6 +309,18 @@ function makeConfig() {
     get agentTradingEnabled(): boolean {
       return process.env.AGENT_TRADING_ENABLED === "true" || process.env.AGENT_TRADING_ENABLED === "1";
     },
+    /** If true, trigger-all runs discovery: fetch OPEN markets and enqueue new ones per agent (main only). Default true. */
+    get agentDiscoveryEnabled(): boolean {
+      return process.env.AGENT_DISCOVERY_ENABLED !== "false" && process.env.AGENT_DISCOVERY_ENABLED !== "0";
+    },
+    /** Max new markets to enqueue per agent per discovery run (main). Default 10. */
+    get agentDiscoveryMaxNewPerAgentPerRun(): number {
+      return Math.max(1, Math.min(50, Number(process.env.AGENT_DISCOVERY_MAX_NEW_PER_AGENT) || 10));
+    },
+    /** Max OPEN markets to fetch when discovering (main). Default 50. */
+    get agentDiscoveryMarketsLimit(): number {
+      return Math.max(10, Math.min(200, Number(process.env.AGENT_DISCOVERY_MARKETS_LIMIT) || 50));
+    },
   };
 }
 

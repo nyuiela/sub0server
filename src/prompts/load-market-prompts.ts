@@ -95,5 +95,9 @@ OUTPUT FORMAT:
   - "outcomeSlotCount": number (optional). 2 for binary. Default {{DEFAULT_OUTCOME_SLOT_COUNT}}.
 - Output MUST be valid JSON only. No markdown, no code fences, no prose before or after.
 - Minified (one line) preferred. Property order: "question" first, then "context", then "durationSeconds", then "outcomeSlotCount".
-- Generate exactly the number of items requested (or up to 10 if not specified).`;
+- Generate exactly the number of items requested (or up to 10 if not specified).
+
+DURATION VARIETY (for simulation and date-range filtering):
+- Markets are NOT limited to 1 day, 1 week, or 1 month. You may create markets that expire in a day or more, a week or more, a month or more, or other durations.
+- Vary durationSeconds across the batch: include a mix of short (e.g. 86400 = 1 day), medium (e.g. 604800 = 1 week), and longer (e.g. 2592000 = 30 days, or more). You may randomize which duration each question uses so that simulation can filter markets by date range (past, current, resolved).`;
 }
