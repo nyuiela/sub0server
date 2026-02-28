@@ -88,7 +88,7 @@ async function createPendingTrade(
   outcomeIndex: number,
   side: "BID" | "ASK",
   quantity: string,
-  pendingReason: "NO_WALLET" | "INSUFFICIENT_BALANCE"
+  pendingReason: "NO_WALLET" | "INSUFFICIENT_BALANCE" | "INSUFFICIENT_POSITION"
 ): Promise<void> {
   const prisma = getPrismaClient();
   await prisma.pendingAgentTrade.create({
@@ -114,10 +114,15 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
   }
 
   const prisma = getPrismaClient();
+  const isSimulate = chainKey !== CHAIN_KEY_MAIN;
   const [enqueued, agent, market] = await Promise.all([
     prisma.agentEnqueuedMarket.findUnique({
       where: { agentId_marketId: { agentId, marketId } },
-      select: { nextRunAt: true },
+      select: {
+        nextRunAt: true,
+        simulateDateRangeStart: true,
+        simulateDateRangeEnd: true,
+      },
     }),
     prisma.agent.findUnique({
       where: { id: agentId },
@@ -152,7 +157,7 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     console.log(`Agent ${agentId} not ACTIVE; skipping`);
     return;
   }
-  if (market.status !== "OPEN") {
+  if (!isSimulate && market.status !== "OPEN") {
     console.log(`Market ${marketId} not OPEN; skipping`);
     return;
   }
@@ -165,6 +170,25 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     return;
   }
 
+  const positions = await prisma.position.findMany({
+    where: { agentId, marketId, status: "OPEN" },
+    select: { outcomeIndex: true, side: true, collateralLocked: true },
+  });
+  const currentPositions = positions.map((p) => ({
+    outcomeIndex: p.outcomeIndex,
+    side: p.side,
+    quantity: p.collateralLocked.toString(),
+  }));
+
+  const simulationContext =
+    isSimulate && enqueued?.simulateDateRangeEnd
+      ? {
+          asOfDate: enqueued.simulateDateRangeEnd.toISOString(),
+          dateRangeEnd: enqueued.simulateDateRangeEnd.toISOString(),
+          dateRangeStart: enqueued.simulateDateRangeStart?.toISOString(),
+        }
+      : undefined;
+
   const modelSettings = agent.modelSettings as { model?: string } | null;
   const decision = await runTradingAnalysis({
     marketName: market.name,
@@ -172,6 +196,8 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     agentName: agent.name,
     personaSummary: agent.persona?.slice(0, 500),
     model: modelSettings?.model,
+    simulationContext,
+    currentPositions,
   });
 
   if (decision.action === "skip") {
@@ -203,11 +229,22 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     return;
   }
 
-  const balance = new Decimal(agent.balance?.toString() ?? "0");
   const qty = new Decimal(quantity);
-  if (balance.lt(qty)) {
-    await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_BALANCE");
-    return;
+  if (side === "ASK") {
+    const longForOutcome = positions
+      .filter((p) => p.outcomeIndex === outcomeIndex && p.side === "LONG")
+      .reduce((sum, p) => sum.plus(p.collateralLocked.toString()), new Decimal(0));
+    if (longForOutcome.lt(qty)) {
+      await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_POSITION");
+      return;
+    }
+  } else {
+    const balanceStr = await getAgentBalanceForChain(agentId, chainKey);
+    const balance = new Decimal(balanceStr ?? "0");
+    if (balance.lt(qty)) {
+      await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_BALANCE");
+      return;
+    }
   }
 
   const result = await submitOrderFromWorker({

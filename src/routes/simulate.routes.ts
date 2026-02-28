@@ -5,6 +5,7 @@ import { requireUser } from "../lib/auth.js";
 import { getRedisConnection } from "../lib/redis.js";
 import { upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
 import { CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
+import { enqueueAgentPredictionNow } from "../workers/queue.js";
 import {
   getTenderlyChainConfig,
   checkFundingEligibility,
@@ -232,6 +233,101 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         success: true,
         nativeTxHash: result.nativeTxHash,
         usdcTxHash: result.usdcTxHash,
+      });
+    }
+  );
+
+  /** POST /api/simulate/start - Start simulation: discover markets in date range, enqueue for agent (tenderly), trigger analysis. Agent will only use info within the date range (as-of simulation). */
+  app.post(
+    "/api/simulate/start",
+    async (
+      req: FastifyRequest<{
+        Body: { agentId?: string; dateRange?: { start?: string; end?: string } };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const user = requireUser(req);
+      if (!user?.userId) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const agentId = req.body?.agentId?.trim();
+      const dateRange = req.body?.dateRange;
+      if (!agentId) {
+        return reply.code(400).send({ error: "agentId is required" });
+      }
+      const startStr = dateRange?.start?.trim();
+      const endStr = dateRange?.end?.trim();
+      if (!startStr || !endStr) {
+        return reply.code(400).send({
+          error: "dateRange.start and dateRange.end are required (ISO date strings)",
+        });
+      }
+      const rangeStart = new Date(startStr);
+      const rangeEnd = new Date(endStr);
+      if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime())) {
+        return reply.code(400).send({ error: "Invalid dateRange dates" });
+      }
+      if (rangeStart > rangeEnd) {
+        return reply.code(400).send({ error: "dateRange.start must be before dateRange.end" });
+      }
+      const prisma = getPrismaClient();
+      const agent = await prisma.agent.findUnique({
+        where: { id: agentId },
+        select: { ownerId: true },
+      });
+      if (!agent) {
+        return reply.code(404).send({ error: "Agent not found" });
+      }
+      if (agent.ownerId !== user.userId) {
+        return reply.code(403).send({ error: "Forbidden: not your agent" });
+      }
+      const marketsInRange = await prisma.market.findMany({
+        where: {
+          questionId: { not: null },
+          OR: [
+            {
+              resolutionDate: { gte: rangeStart, lte: rangeEnd },
+            },
+            {
+              createdAt: { lte: rangeEnd },
+              resolutionDate: { gt: rangeEnd },
+            },
+          ],
+        },
+        orderBy: { resolutionDate: "desc" },
+        take: 100,
+        select: { id: true },
+      });
+      const jobIds: string[] = [];
+      for (const m of marketsInRange) {
+        await prisma.agentEnqueuedMarket.upsert({
+          where: { agentId_marketId: { agentId, marketId: m.id } },
+          create: {
+            agentId,
+            marketId: m.id,
+            chainKey: CHAIN_KEY_TENDERLY,
+            simulateDateRangeStart: rangeStart,
+            simulateDateRangeEnd: rangeEnd,
+          },
+          update: {
+            chainKey: CHAIN_KEY_TENDERLY,
+            simulateDateRangeStart: rangeStart,
+            simulateDateRangeEnd: rangeEnd,
+            status: "PENDING",
+            discardReason: null,
+            nextRunAt: null,
+          },
+        });
+        const jobId = await enqueueAgentPredictionNow({
+          agentId,
+          marketId: m.id,
+          chainKey: CHAIN_KEY_TENDERLY,
+        });
+        jobIds.push(jobId);
+      }
+      return reply.send({
+        enqueued: marketsInRange.length,
+        jobIds,
       });
     }
   );

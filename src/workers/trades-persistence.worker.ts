@@ -33,8 +33,10 @@ async function resolveAddress(
   if (agentId) {
     const agent = await prisma.agent.findUnique({
       where: { id: agentId },
-      select: { owner: { select: { address: true } } },
+      select: { walletAddress: true, owner: { select: { address: true } } },
     });
+    const wallet = agent?.walletAddress?.trim();
+    if (wallet) return wallet;
     return agent?.owner?.address ?? null;
   }
   return null;
