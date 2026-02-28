@@ -80,6 +80,37 @@ export async function executeUserTradeOnCre(payload: CreOrderPayload): Promise<C
   return { ok: true, txHash };
 }
 
+/** Action for MARKET orders: execute against contract directly (no matching). */
+export type CreMarketAction = "buy" | "sell";
+
+/**
+ * Execute a user MARKET order on CRE with action "buy" or "sell". CRE executes against the contract
+ * directly; no order book matching. Called at submit time for user MARKET orders.
+ */
+export async function executeUserMarketTradeOnCre(
+  payload: CreOrderPayload,
+  side: "BID" | "ASK"
+): Promise<CreExecuteUserResult> {
+  const action: CreMarketAction = side === "BID" ? "buy" : "sell";
+  const body: Record<string, unknown> = {
+    action,
+    questionId: payload.questionId,
+    conditionId: payload.conditionId,
+    outcomeIndex: payload.outcomeIndex,
+    buy: payload.buy,
+    quantity: payload.quantity,
+    tradeCostUsdc: payload.tradeCostUsdc,
+    nonce: payload.nonce,
+    deadline: payload.deadline,
+    userSignature: payload.userSignature,
+  };
+  const result = await postToCre(body);
+  if (!result.ok) return { ok: false, error: result.error };
+  const data = result.data as { txHash?: string } | undefined;
+  const txHash = typeof data?.txHash === "string" ? data.txHash : undefined;
+  return { ok: true, txHash };
+}
+
 /**
  * Execute one trade on CRE with agent key (executeConfidentialTrade). CRE signs with agent + DON and submits.
  */

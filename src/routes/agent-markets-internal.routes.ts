@@ -141,7 +141,7 @@ async function createMarketFromOnchainResult(
         ? body.questionId
         : `0x${body.questionId}`) as Hex;
       const seeded = await seedMarketLiquidityOnChain(questionIdHex, config.platformSeedAmountUsdcRaw);
-      const initialVolume = seeded ? rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw) : "0";
+      const initialVolume = 10000000;
       const initialLiquidity = initialVolume;
       await prisma.market.update({
         where: { id: updated.id },
@@ -150,7 +150,7 @@ async function createMarketFromOnchainResult(
       await broadcastMarketUpdate({
         marketId: updated.id,
         reason: MARKET_UPDATE_REASON.CREATED,
-        volume: initialVolume,
+        volume: initialVolume.toString(),
       });
       const refreshed = await prisma.market.findUnique({ where: { id: updated.id } });
       return {
@@ -182,10 +182,7 @@ async function createMarketFromOnchainResult(
   }
 
   const collateralToken =
-    config.defaultCollateralToken?.trim() &&
-      config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
-      ? config.defaultCollateralToken
-      : "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+    contracts.contracts?.usdc as Hex;
   const outcomeCount = chainMarket.outcomeSlotCount;
   const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
   if (outcomePositionIds == null) {
@@ -202,8 +199,8 @@ async function createMarketFromOnchainResult(
     ? body.questionId
     : `0x${body.questionId}`) as Hex;
   const seeded = await seedMarketLiquidityOnChain(questionIdHex, config.platformSeedAmountUsdcRaw);
-  const initialVolume = seeded ? rawUsdcToDecimalString(config.platformSeedAmountUsdcRaw) : "0";
-  const initialLiquidity = initialVolume;
+  // const initialVolume = seeded ? rawUsdcToDecimalString(BigInt(contracts.platform?.initialLiquidityPerOutcome ?? "0")) : "0";
+  const initialLiquidity = seeded ? contracts.platform?.initialLiquidityPerOutcome : "0";
 
   const market = await prisma.market.create({
     data: {
@@ -220,7 +217,7 @@ async function createMarketFromOnchainResult(
       createMarketTxHash: body.createMarketTxHash,
       platform: "NATIVE",
       agentSource: body.agentSource ?? null,
-      volume: initialVolume,
+      volume: initialLiquidity,
       liquidity: initialLiquidity,
     },
   });
@@ -235,7 +232,7 @@ async function createMarketFromOnchainResult(
   await broadcastMarketUpdate({
     marketId: market.id,
     reason: MARKET_UPDATE_REASON.CREATED,
-    volume: initialVolume,
+    volume: initialLiquidity,
   });
 
   return {

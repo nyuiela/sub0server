@@ -13,6 +13,11 @@
         "name": "_creForwarder",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "_permissionManager",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -20,6 +25,13 @@
   {
     "type": "function",
     "name": "DON_QUOTE_TYPEHASH",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "GAME_CONTRACT_ROLE",
     "inputs": [],
     "outputs": [{ "name": "", "type": "bytes32", "internalType": "bytes32" }],
     "stateMutability": "view"
@@ -207,6 +219,19 @@
   },
   {
     "type": "function",
+    "name": "permissionManager",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IPermissionManager"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "registerMarket",
     "inputs": [
       { "name": "questionId", "type": "bytes32", "internalType": "bytes32" },
@@ -240,6 +265,38 @@
         "name": "_backendSigner",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setConfig",
+    "inputs": [
+      {
+        "name": "_config",
+        "type": "tuple",
+        "internalType": "struct PredictionVault.Config",
+        "components": [
+          {
+            "name": "permissionManager",
+            "type": "address",
+            "internalType": "address"
+          },
+          { "name": "usdc", "type": "address", "internalType": "address" },
+          { "name": "ctf", "type": "address", "internalType": "address" },
+          {
+            "name": "backendSigner",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "donSigner",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
       }
     ],
     "outputs": [],
@@ -617,6 +674,14 @@
   },
   { "type": "error", "name": "MarketNotRegistered", "inputs": [] },
   { "type": "error", "name": "NonceAlreadyUsed", "inputs": [] },
+  {
+    "type": "error",
+    "name": "NotAuthorized",
+    "inputs": [
+      { "name": "account", "type": "address", "internalType": "address" },
+      { "name": "role", "type": "bytes32", "internalType": "bytes32" }
+    ]
+  },
   {
     "type": "error",
     "name": "OwnableInvalidOwner",

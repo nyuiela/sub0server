@@ -1,11 +1,17 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { randomUUID } from "crypto";
+import { Decimal } from "decimal.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { submitOrder } from "../engine/order-queue.js";
 import { requireUserOrApiKey } from "../lib/permissions.js";
 import { requireUser, requireApiKey } from "../lib/auth.js";
 import { orderSubmitSchema, type OrderSubmitInput } from "../schemas/order.schema.js";
 import type { CreOrderPayload } from "../types/cre-order.js";
+import { executeUserMarketTradeOnCre } from "../services/cre-execute-trade.service.js";
+import { enqueueOrderAndTradesForPersistence } from "../workers/trades-queue.js";
+import { getRedisPublisher } from "../lib/redis.js";
+import { REDIS_CHANNELS } from "../config/index.js";
+import type { EngineOrder, ExecutedTrade } from "../types/order-book.js";
 
 export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/orders", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
@@ -66,8 +72,9 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
+    const orderId = randomUUID();
     const input = {
-      id: randomUUID(),
+      id: orderId,
       marketId: raw.marketId,
       outcomeIndex: raw.outcomeIndex,
       side: raw.side,
@@ -78,6 +85,70 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       agentId,
       crePayload: crePayload ?? null,
     };
+
+    if (type === "MARKET" && isUserOrder && crePayload) {
+      try {
+        const creResult = await executeUserMarketTradeOnCre(crePayload, raw.side);
+        if (!creResult.ok) {
+          return reply.code(502).send({
+            error: "CRE execution failed",
+            message: creResult.error ?? "Unknown error",
+          });
+        }
+        const qtyStr = String(raw.quantity);
+        const priceStr = new Decimal(crePayload.tradeCostUsdc).div(1e6).div(qtyStr).toFixed(18);
+        const executedAt = Date.now();
+        const tradeId = `trade-market-cre-${raw.marketId}-${raw.outcomeIndex}-${executedAt}-${randomUUID().slice(0, 8)}`;
+        const order: EngineOrder = {
+          id: orderId,
+          marketId: raw.marketId,
+          outcomeIndex: raw.outcomeIndex,
+          side: raw.side,
+          type: "MARKET",
+          price: "0",
+          quantity: qtyStr,
+          remainingQty: "0",
+          status: "FILLED",
+          createdAt: executedAt,
+          userId: userId ?? undefined,
+          agentId: agentId ?? undefined,
+          crePayload: null,
+        };
+        const trade: ExecutedTrade = {
+          id: tradeId,
+          marketId: raw.marketId,
+          outcomeIndex: raw.outcomeIndex,
+          price: priceStr,
+          quantity: qtyStr,
+          makerOrderId: "contract",
+          takerOrderId: orderId,
+          side: raw.side,
+          userId: userId ?? undefined,
+          agentId: agentId ?? undefined,
+          makerUserId: null,
+          makerAgentId: null,
+          executedAt,
+        };
+        await enqueueOrderAndTradesForPersistence(order, [trade]);
+        const redis = await getRedisPublisher();
+        await redis.publish(REDIS_CHANNELS.TRADES, JSON.stringify({ trade }));
+        await redis.publish(REDIS_CHANNELS.MARKET_UPDATES, JSON.stringify({ marketId: raw.marketId, reason: "orderbook" }));
+        return reply.code(201).send({
+          orderId,
+          type: "MARKET",
+          status: "FILLED",
+          trades: [{ ...trade }],
+          txHash: creResult.txHash,
+        });
+      } catch (err) {
+        req.log.error(err);
+        return reply.code(500).send({
+          error: "MARKET order failed",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     try {
       const result = await submitOrder(input);
       return reply.code(201).send({

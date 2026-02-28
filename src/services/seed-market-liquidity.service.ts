@@ -13,20 +13,8 @@ const require = createRequire(import.meta.url);
 const contractsData = require("../lib/contracts.json") as { contracts?: { predictionVault?: string } };
 
 const PREDICTION_VAULT_ADDRESS =
-  contractsData.contracts?.predictionVault ?? "0x37Ad1be17Be247854F9D4F8Af95eeEFFDe0b179E";
-
-const SEED_MARKET_LIQUIDITY_ABI = [
-  {
-    type: "function" as const,
-    name: "seedMarketLiquidity",
-    inputs: [
-      { name: "questionId", type: "bytes32", internalType: "bytes32" },
-      { name: "amountUsdc", type: "uint256", internalType: "uint256" },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable" as const,
-  },
-] as const;
+  contractsData.contracts?.predictionVault;
+import predictionVaultAbi from "../lib/contract/predictionVault.json" with { type: "json" };
 
 let walletClient: ReturnType<typeof createWalletClient> | null = null;
 let publicClient: ReturnType<typeof createPublicClient> | null = null;
@@ -62,22 +50,50 @@ export async function seedMarketLiquidityOnChain(
   questionId: Hex,
   amountUsdc: bigint
 ): Promise<boolean> {
+  const vaultAddress = PREDICTION_VAULT_ADDRESS?.trim();
+  const hasRpc = Boolean(config.chainRpcUrl?.trim());
+  const hasPk = Boolean(config.contractPrivateKey?.trim());
+
+  if (!hasRpc || !hasPk) {
+    console.warn("[seed-market-liquidity] Skipped: missing CHAIN_RPC_URL or CONTRACT_PRIVATE_KEY");
+    return false;
+  }
+  if (!vaultAddress) {
+    console.warn("[seed-market-liquidity] Skipped: contracts.json has no predictionVault address");
+    return false;
+  }
+
   const clients = getClients();
-  if (!clients) return false;
+  if (!clients) {
+    console.warn("[seed-market-liquidity] Skipped: getClients() returned null");
+    return false;
+  }
+  const account = clients.wallet.account;
+  if (!account) {
+    console.warn("[seed-market-liquidity] Skipped: wallet has no account");
+    return false;
+  }
+
   try {
-    const account = clients.wallet.account;
-    if (!account) return false;
     const hash = await clients.wallet.writeContract({
       account,
-      address: PREDICTION_VAULT_ADDRESS as Hex,
-      abi: SEED_MARKET_LIQUIDITY_ABI,
+      address: vaultAddress as Hex,
+      abi: predictionVaultAbi,
       functionName: "seedMarketLiquidity",
       args: [questionId, amountUsdc],
       chain: sepolia,
     });
     const receipt = await clients.public.waitForTransactionReceipt({ hash });
-    return receipt.status === "success";
-  } catch {
+    const ok = receipt.status === "success";
+    if (ok) {
+      console.info("[seed-market-liquidity] Seeded", { questionId, hash, status: receipt.status });
+    } else {
+      console.warn("[seed-market-liquidity] Tx reverted", { questionId, hash, status: receipt.status });
+    }
+    return ok;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[seed-market-liquidity] Failed", { questionId, error: msg });
     return false;
   }
 }

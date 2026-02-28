@@ -13,7 +13,8 @@
   "platform": {
     "creatorAddress": "0xf0830060f836B8d54bF02049E5905F619487989e",
     "oracleAddress": "0x4fd81EfC19A5Af3E9eAd9c147e5E9cF3CF823DE2",
-    "usdcAddress": "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF"
+    "usdcAddress": "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF",
+    "initialLiquidityPerOutcome": "10000000000"
   },
   "eip712": {
     "domainName": "Sub0PredictionVault",

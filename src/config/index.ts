@@ -173,12 +173,17 @@ function makeConfig() {
       }
       return BigInt("30000000000000000"); // 0.03 ETH
     },
-    /** USDC amount for predictionVault.seedMarketLiquidity in smallest units (6 decimals). Use PLATFORM_INITIAL_LIQUIDITY_RAW for raw bigint, else PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME (number) * 10^6. */
+    /** USDC amount for predictionVault.seedMarketLiquidity in smallest units (6 decimals). Use PLATFORM_INITIAL_LIQUIDITY_RAW for raw bigint, else PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME (number) * 10^6. Capped to avoid contract reverts from absurd env values. */
     get platformSeedAmountUsdcRaw(): bigint {
+      const MAX_SEED_RAW = BigInt(1e15);
+      const defaultRaw = BigInt(Math.floor(this.platformInitialLiquidityPerOutcome)) * BigInt(1e6);
       const raw = process.env.PLATFORM_INITIAL_LIQUIDITY_RAW?.trim();
       if (raw) {
         try {
-          return BigInt(raw);
+          const value = BigInt(raw);
+          if (value <= MAX_SEED_RAW) return value;
+          console.warn("[config] platformSeedAmountUsdcRaw capped: PLATFORM_INITIAL_LIQUIDITY_RAW too large (max 1e15 raw). Using default.");
+          return defaultRaw;
         } catch {
           // fallback
         }
@@ -187,17 +192,28 @@ function makeConfig() {
       if (perOutcome) {
         try {
           const n = Number(perOutcome);
-          if (Number.isFinite(n) && n >= 0) return BigInt(Math.floor(n)) * BigInt(1e6);
-          return BigInt(perOutcome);
+          if (Number.isFinite(n) && n >= 0) {
+            const value = BigInt(Math.floor(n)) * BigInt(1e6);
+            if (value <= MAX_SEED_RAW) return value;
+            console.warn("[config] platformSeedAmountUsdcRaw capped: PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME too large (max 1e9 USDC). Using default.");
+            return defaultRaw;
+          }
+          const value = BigInt(perOutcome);
+          if (value <= MAX_SEED_RAW) return value;
+          console.warn("[config] platformSeedAmountUsdcRaw capped: PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME raw value too large. Using default.");
+          return defaultRaw;
         } catch {
           try {
-            return BigInt(perOutcome);
+            const value = BigInt(perOutcome);
+            if (value <= MAX_SEED_RAW) return value;
+            console.warn("[config] platformSeedAmountUsdcRaw capped: raw value too large. Using default.");
+            return defaultRaw;
           } catch {
             // fallback
           }
         }
       }
-      return BigInt(Math.floor(this.platformInitialLiquidityPerOutcome)) * BigInt(1e6);
+      return defaultRaw;
     },
     /** Gemini model for market generation (primary; first of geminiModelsListing). */
     get geminiModel(): string {

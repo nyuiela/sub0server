@@ -24,6 +24,8 @@ import type {
   CreDraftPayloadForCre,
   AgentSource,
 } from "../types/agent-markets.js";
+import { Hex } from "thirdweb";
+import contracts from "../lib/contracts.json" with { type: "json" };
 
 const DEFAULT_DURATION_SECONDS = 86400;
 const DEFAULT_OUTCOME_SLOT_COUNT = 2;
@@ -422,8 +424,8 @@ export async function filterPayloadsByExistingQuestionId(
   return filtered;
 }
 
-const DEFAULT_COLLATERAL =
-  "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+// const DEFAULT_COLLATERAL =
+// "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
 
 /** DiceBear URL for market image; seed must be alphanumeric. Uses market id for unique image per market. */
 function marketImageUrl(seed: string): string {
@@ -442,11 +444,7 @@ export async function createDraftMarketsFromAgents(
   const payloads = await generateAgentMarkets(count);
   if (payloads.length === 0) return { created: 0 };
   const prisma = getPrismaClient();
-  const collateralToken =
-    config.defaultCollateralToken?.trim() &&
-    config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
-      ? config.defaultCollateralToken
-      : DEFAULT_COLLATERAL;
+  const collateralToken = contracts.contracts?.usdc as Hex;
   let created = 0;
   for (const p of payloads) {
     const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
