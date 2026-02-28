@@ -28,6 +28,7 @@ import {
   type OnchainMarketCreatedBatchInput,
   type AgentMarketsQueryInput,
 } from "../schemas/agent-markets.schema.js";
+import contracts from "../lib/contracts.json" with { type: "json" };
 
 function serializeMarket(market: {
   id: string;
@@ -115,11 +116,7 @@ async function createMarketFromOnchainResult(
     }
     if (draft && draft.questionId == null && chainMarket) {
       const conditionId = chainMarket.conditionId;
-      const collateralToken =
-        config.defaultCollateralToken?.trim() &&
-        config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
-          ? config.defaultCollateralToken
-          : "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+      const collateralToken = contracts.contracts?.usdc as Hex;
       const outcomeCount = chainMarket.outcomeSlotCount;
       const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
       if (outcomePositionIds == null) {
@@ -186,7 +183,7 @@ async function createMarketFromOnchainResult(
 
   const collateralToken =
     config.defaultCollateralToken?.trim() &&
-    config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
+      config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
       ? config.defaultCollateralToken
       : "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
   const outcomeCount = chainMarket.outcomeSlotCount;
