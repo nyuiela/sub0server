@@ -16,6 +16,7 @@ import type { EngineOrder, ExecutedTrade } from "../types/order-book.js";
 export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/orders", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
     if (!requireUserOrApiKey(req, reply)) return;
+    console.log("req.body", req.body);
     const parsed = orderSubmitSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
@@ -64,7 +65,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         conditionId: market.conditionId,
         outcomeIndex: raw.outcomeIndex,
         buy: raw.side === "BID",
-        quantity: String(raw.quantity),
+        quantity: raw.quantity as any,
         tradeCostUsdc: raw.tradeCostUsdc,
         nonce: raw.nonce,
         deadline: raw.deadline,
@@ -96,7 +97,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           });
         }
         const qtyStr = String(raw.quantity);
-        const priceStr = new Decimal(crePayload.tradeCostUsdc).div(1e6).div(qtyStr).toFixed(18);
+        // const priceStr = new Decimal(crePayload.tradeCostUsdc).div(1e6).div(qtyStr).toFixed(18);
         const executedAt = Date.now();
         const tradeId = `trade-market-cre-${raw.marketId}-${raw.outcomeIndex}-${executedAt}-${randomUUID().slice(0, 8)}`;
         const order: EngineOrder = {
@@ -106,7 +107,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           side: raw.side,
           type: "MARKET",
           price: "0",
-          quantity: qtyStr,
+          quantity: crePayload.quantity,
           remainingQty: "0",
           status: "FILLED",
           createdAt: executedAt,
@@ -118,8 +119,8 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           id: tradeId,
           marketId: raw.marketId,
           outcomeIndex: raw.outcomeIndex,
-          price: priceStr,
-          quantity: qtyStr,
+          price: crePayload.tradeCostUsdc,
+          quantity: crePayload.quantity,
           makerOrderId: "contract",
           takerOrderId: orderId,
           side: raw.side,

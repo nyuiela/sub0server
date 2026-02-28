@@ -36,7 +36,7 @@ import type { Worker } from "bullmq";
 import type { TradesJobPayload } from "./workers/trades-queue.js";
 import type { WebSocket } from "ws";
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({ logger: false });
 let tradesWorker: Worker<TradesJobPayload> | null = null;
 
 await fastify.register(fastifyCookie, { parseOptions: {} });
