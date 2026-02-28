@@ -28,7 +28,8 @@
     "news-ingest": "tsx src/workers/news-ingest.worker.ts",
     "agent-markets": "tsx src/scripts/run-agent-market-creation.ts",
     "agent-markets:dry": "tsx src/scripts/run-agent-market-creation.ts --dry-run",
-    "agent-markets:generate": "tsx src/scripts/generate-agent-markets-only.ts"
+    "agent-markets:generate": "tsx src/scripts/generate-agent-markets-only.ts",
+    "pricing-test": "tsx src/scripts/pricing-engine-test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -42,12 +43,13 @@
     "fastify": "^5.7.4",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
-    "prisma": "^7.4.1",
     "pg": "^8.19.0",
+    "prisma": "^7.4.1",
     "rss-parser": "^3.13.0",
     "thirdweb": "^5.119.0",
     "viem": "^2.46.3",
     "ws": "^8.19.0",
+    "x402": "^1.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
