@@ -1,6 +1,7 @@
 {
   "chainId": 11155111,
   "chainRpcUrl": "https://sepolia.drpc.org",
+  "baseSepoliaRpcUrl": "https://base-sepolia.drpc.org",
   "chainSelectorName": "ethereum-testnet-sepolia",
   "contracts": {
     "sub0": "0xF5CdCaf95BB27FB43919d1c664a2618c773330dd",
