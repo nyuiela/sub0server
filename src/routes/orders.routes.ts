@@ -74,6 +74,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const orderId = randomUUID();
+    const chainKey = raw.chainKey ?? null;
     const input = {
       id: orderId,
       marketId: raw.marketId,
@@ -85,6 +86,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       userId,
       agentId,
       crePayload: crePayload ?? null,
+      chainKey,
     };
 
     if (type === "MARKET" && isUserOrder && crePayload) {
@@ -114,6 +116,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           userId: userId ?? undefined,
           agentId: agentId ?? undefined,
           crePayload: null,
+          chainKey: chainKey ?? null,
         };
         const trade: ExecutedTrade = {
           id: tradeId,

@@ -70,11 +70,11 @@ function makeConfig() {
     },
     /** Initial LONG size per outcome when creating platform positions on market create. */
     get platformInitialLiquidityPerOutcome(): number {
-      return Number(optionalEnv("PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME", "10000"));
+      return Number(optionalEnv("PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME", "1000000"));
     },
     /** News ingestion: poll interval in ms (default 10s). */
     get newsPollIntervalMs(): number {
-      return Number(optionalEnv("NEWS_POLL_INTERVAL_MS", "10000"));
+      return Number(optionalEnv("NEWS_POLL_INTERVAL_MS", "100000"));
     },
     /** CryptoPanic API key (optional). When set, fetches from CryptoPanic in addition to RSS. */
     get cryptopanicApiKey(): string | undefined {
@@ -320,6 +320,14 @@ function makeConfig() {
     /** Max OPEN markets to fetch when discovering (main). Default 50. */
     get agentDiscoveryMarketsLimit(): number {
       return Math.max(10, Math.min(200, Number(process.env.AGENT_DISCOVERY_MARKETS_LIMIT) || 50));
+    },
+    /** If true, backend runs trigger-all on an interval (no separate cron script/container). Default false. */
+    get triggerAllCronEnabled(): boolean {
+      return process.env.TRIGGER_ALL_CRON_ENABLED === "true" || process.env.TRIGGER_ALL_CRON_ENABLED === "1";
+    },
+    /** Interval in ms for in-process trigger-all cron. Default 300000 (5 min). Only when TRIGGER_ALL_CRON_ENABLED=true. */
+    get triggerAllCronIntervalMs(): number {
+      return Math.max(60_000, Number(process.env.TRIGGER_ALL_CRON_INTERVAL_MS) || 300_000);
     },
   };
 }

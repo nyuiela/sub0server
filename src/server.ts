@@ -32,12 +32,14 @@ import { registerCreCallbackRoutes } from "./routes/cre-callback.routes.js";
 import { registerSimulateRoutes } from "./routes/simulate.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
 import { startCreMarketCron, stopCreMarketCron } from "./services/cre-market-cron.js";
+import { runTriggerAll } from "./services/trigger-all.service.js";
 import type { Worker } from "bullmq";
 import type { TradesJobPayload } from "./workers/trades-queue.js";
 import type { WebSocket } from "ws";
 
 const fastify = Fastify({ logger: true });
 let tradesWorker: Worker<TradesJobPayload> | null = null;
+let triggerAllCronId: ReturnType<typeof setInterval> | null = null;
 
 await fastify.register(fastifyCookie, { parseOptions: {} });
 await fastify.register(fastifyCors, {
@@ -197,6 +199,14 @@ const start = async () => {
     await fastify.listen({ port: config.port, host: "0.0.0.0" });
     tradesWorker = await startTradesPersistenceWorker();
     startCreMarketCron(fastify.log);
+    if (config.triggerAllCronEnabled) {
+      const ms = config.triggerAllCronIntervalMs;
+      fastify.log.info({ intervalMs: ms }, "Trigger-all cron started (in-process)");
+      runTriggerAll(fastify.log).catch((err) => fastify.log.warn({ err }, "Trigger-all initial run failed"));
+      triggerAllCronId = setInterval(() => {
+        runTriggerAll(fastify.log).catch((err) => fastify.log.warn({ err }, "Trigger-all cron run failed"));
+      }, ms);
+    }
     fastify.log.info("Server, WebSocket manager and trades persistence worker started");
   } catch (err) {
     fastify.log.error(err);
@@ -206,6 +216,10 @@ const start = async () => {
 
 const shutdown = async () => {
   stopCreMarketCron();
+  if (triggerAllCronId !== null) {
+    clearInterval(triggerAllCronId);
+    triggerAllCronId = null;
+  }
   if (tradesWorker) {
     await tradesWorker.close();
     tradesWorker = null;

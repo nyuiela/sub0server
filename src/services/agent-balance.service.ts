@@ -10,8 +10,10 @@ import { sepolia } from "viem/chains";
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { broadcastAgentUpdate } from "../lib/broadcast-agent.js";
-import { upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
-import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
+import { getAgentBalanceForChain, upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
+import { CHAIN_KEY_MAIN, CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
+import { getTenderlyChainConfig } from "../utils/tenderly/chainConfig.js";
+import { getErc20Balance } from "../utils/tenderly/balance.js";
 
 const require = createRequire(import.meta.url);
 const contractsData = require("../lib/contracts.json") as {
@@ -143,4 +145,53 @@ export async function syncAgentBalance(agentId: string): Promise<SyncAgentBalanc
     balance: chainBalance,
     previousBalance: dbBalanceStr,
   };
+}
+
+/**
+ * Fetch agent USDC balance from Tenderly chain; update AgentChainBalance(tenderly) and broadcast.
+ * Use after simulate trades so the simulate tab shows the correct balance.
+ */
+export async function syncTenderlyBalance(agentId: string): Promise<SyncAgentBalanceResult> {
+  const prisma = getPrismaClient();
+  const agent = await prisma.agent.findUnique({
+    where: { id: agentId },
+    select: { id: true, walletAddress: true },
+  });
+  if (!agent?.walletAddress?.trim()) {
+    const current = await getAgentBalanceForChain(agentId, CHAIN_KEY_TENDERLY);
+    return { updated: false, balance: current, error: "Agent has no wallet" };
+  }
+
+  const chainConfig = getTenderlyChainConfig();
+  if (!chainConfig?.rpcUrl?.trim() || !chainConfig.usdcAddress?.trim()) {
+    const current = await getAgentBalanceForChain(agentId, CHAIN_KEY_TENDERLY);
+    return { updated: false, balance: current, error: "Tenderly chain not configured" };
+  }
+
+  try {
+    const raw = await getErc20Balance(
+      chainConfig.rpcUrl,
+      chainConfig.usdcAddress,
+      agent.walletAddress
+    );
+    const chainBalance = rawBalanceToDecimalString(raw, USDC_DECIMALS);
+    const dbBalanceStr = await getAgentBalanceForChain(agentId, CHAIN_KEY_TENDERLY);
+    if (new Decimal(chainBalance).eq(new Decimal(dbBalanceStr))) {
+      return { updated: false, balance: dbBalanceStr };
+    }
+    await upsertAgentChainBalance(agentId, CHAIN_KEY_TENDERLY, chainBalance);
+    await broadcastAgentUpdate({ agentId, balance: chainBalance });
+    return {
+      updated: true,
+      balance: chainBalance,
+      previousBalance: dbBalanceStr,
+    };
+  } catch (err) {
+    const current = await getAgentBalanceForChain(agentId, CHAIN_KEY_TENDERLY);
+    return {
+      updated: false,
+      balance: current,
+      error: err instanceof Error ? err.message : "Tenderly balance read failed",
+    };
+  }
 }

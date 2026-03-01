@@ -17,6 +17,7 @@ export const orderSubmitSchema = z
     tradeCostUsdc: z.string().optional(),
     nonce: z.string().optional(),
     deadline: z.string().optional(),
+    chainKey: z.enum(["main", "tenderly"]).optional(),
   })
   .refine(
     (data) => {

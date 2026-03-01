@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "worker": "tsx src/workers/agent-worker.ts",
+    "worker:dev": "tsx watch src/workers/agent-worker.ts",
     "worker:trades": "tsx src/workers/trades-persistence.worker.ts",
     "feed": "tsx src/services/price-feed.service.ts",
     "live-test": "tsx src/scripts/live-test.ts",
@@ -29,7 +30,13 @@
     "agent-markets": "tsx src/scripts/run-agent-market-creation.ts",
     "agent-markets:dry": "tsx src/scripts/run-agent-market-creation.ts --dry-run",
     "agent-markets:generate": "tsx src/scripts/generate-agent-markets-only.ts",
-    "pricing-test": "tsx src/scripts/pricing-engine-test.ts"
+    "pricing-test": "tsx src/scripts/pricing-engine-test.ts",
+    "queue:reset": "tsx src/scripts/reset-agent-queue.ts",
+    "docker:up": "docker compose --profile app up -d",
+    "docker:up:build": "docker compose --profile app up -d --build",
+    "docker:down": "docker compose --profile app down",
+    "docker:dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up -d --build",
+    "docker:dev:down": "docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app down"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

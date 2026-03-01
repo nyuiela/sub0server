@@ -1,6 +1,15 @@
 # Redis + backend + agent-worker for Simulate / Run analysis.
-# Run from sub0server: docker compose up -d
-# Set .env with DATABASE_URL, REDIS_URL, JWT_SECRET, API_KEY, AGENT_TRADING_ENABLED=true, etc.
+# Run from sub0server. Set .env with DATABASE_URL, REDIS_URL, JWT_SECRET, API_KEY, AGENT_TRADING_ENABLED=true, etc.
+#
+# When Postgres runs on the host or in another container (e.g. docker start sub0-postgres), the backend
+# must reach it. Use DATABASE_URL_DOCKER in .env with host.docker.internal instead of localhost, e.g.:
+#   DATABASE_URL_DOCKER=postgresql://user:pass@host.docker.internal:5432/sub0
+# Then Docker services use DATABASE_URL_DOCKER; leave DATABASE_URL as localhost for pnpm dev on the host.
+#
+# Profiles: use --profile app for backend+redis+worker (builds backend). Use --profile cron for cron-only (no build).
+#   docker compose --profile app up -d
+#   docker compose --profile cron up -d   (only lightweight cron container; set BACKEND_URL in .env)
+# Prefer in-process cron: set TRIGGER_ALL_CRON_ENABLED=true in .env so the backend runs trigger-all on an interval (no Docker cron).
 
 services:
   redis:
@@ -12,6 +21,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
+    profiles:
+      - app
 
   backend:
     build: .
@@ -19,11 +30,16 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       PORT: 4000
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-${DATABASE_URL}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "4000:4000"
     depends_on:
       redis: { condition: service_healthy }
     command: ["node", "dist/server.js"]
+    profiles:
+      - app
 
   agent-worker:
     build: .
@@ -32,30 +48,32 @@ services:
       REDIS_URL: redis://redis:6379
       BACKEND_URL: http://backend:4000
       AGENT_TRADING_ENABLED: "true"
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-${DATABASE_URL}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis: { condition: service_healthy }
       backend: { condition: service_started }
     command: ["node", "dist/workers/agent-worker.js"]
     restart: unless-stopped
+    profiles:
+      - app
 
-  # Optional: cron triggers analysis for all agents every 5 minutes (enqueues jobs; agent-worker processes them).
-  # Requires API_KEY in .env. Disable if you rely on repeat-every-60s enqueue or manual "Run analysis" only.
+  # Lightweight cron container; only runs when using --profile cron. Does NOT build backend.
   agent-cron:
     image: alpine:3.19
     env_file: .env
     environment:
-      BACKEND_URL: http://backend:4000
-      CRON_SCHEDULE: "*/5 * * * *"
+      CRON_INTERVAL_SECONDS: "300"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         apk add --no-cache curl
+        INTERVAL=$${CRON_INTERVAL_SECONDS:-300}
         while true; do
-          sleep 300
+          sleep $$INTERVAL
           curl -sf -X POST "$${BACKEND_URL}/api/agent/trigger-all" -H "x-api-key: $${API_KEY}" || true
         done
-    depends_on:
-      backend: { condition: service_started }
     restart: unless-stopped
     profiles:
       - cron

@@ -14,7 +14,8 @@ import {
   getErc20Balance,
 } from "../utils/tenderly/index.js";
 import { getX402Config } from "../x402/config.js";
-import { buildSimulatePaymentRequired } from "../x402/challenge.js";
+import { computeSimulatePriceUsdc, usdcToAtomic } from "../x402/pricing.js";
+import { paySimulateWithAgent } from "../services/agent-x402-pay.service.js";
 
 const USDC_DECIMALS = 6;
 
@@ -55,6 +56,104 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       paymentChainId: x402.chainId,
     });
   });
+
+  /** GET /api/simulations - List simulations for the current user (for Settings > Simulations). */
+  app.get("/api/simulations", async (req: FastifyRequest, reply: FastifyReply) => {
+    const user = requireUser(req);
+    if (!user?.userId) {
+      return reply.code(401).send({ error: "Authentication required" });
+    }
+    const prisma = getPrismaClient();
+    const list = await prisma.simulation.findMany({
+      where: { ownerId: user.userId },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        agentId: true,
+        dateRangeStart: true,
+        dateRangeEnd: true,
+        maxMarkets: true,
+        durationMinutes: true,
+        status: true,
+        createdAt: true,
+        agent: { select: { name: true } },
+        _count: { select: { enqueuedMarkets: true } },
+      },
+    });
+    return reply.send({
+      simulations: list.map((s) => ({
+        id: s.id,
+        agentId: s.agentId,
+        agentName: s.agent.name,
+        dateRangeStart: s.dateRangeStart.toISOString(),
+        dateRangeEnd: s.dateRangeEnd.toISOString(),
+        maxMarkets: s.maxMarkets,
+        durationMinutes: s.durationMinutes,
+        status: s.status,
+        createdAt: s.createdAt.toISOString(),
+        enqueuedCount: s._count.enqueuedMarkets,
+      })),
+    });
+  });
+
+  /** GET /api/simulations/:id - One simulation with enqueued markets (for Settings > Simulations > detail). */
+  app.get(
+    "/api/simulations/:id",
+    async (
+      req: FastifyRequest<{ Params: { id: string } }>,
+      reply: FastifyReply
+    ) => {
+      const user = requireUser(req);
+      if (!user?.userId) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const id = req.params.id?.trim();
+      if (!id) return reply.code(400).send({ error: "Simulation id required" });
+      const prisma = getPrismaClient();
+      const sim = await prisma.simulation.findFirst({
+        where: { id, ownerId: user.userId },
+        select: {
+          id: true,
+          agentId: true,
+          dateRangeStart: true,
+          dateRangeEnd: true,
+          maxMarkets: true,
+          durationMinutes: true,
+          status: true,
+          createdAt: true,
+          agent: { select: { name: true } },
+          enqueuedMarkets: {
+            select: {
+              marketId: true,
+              status: true,
+              discardReason: true,
+              market: { select: { id: true, name: true, status: true } },
+            },
+          },
+        },
+      });
+      if (!sim) return reply.code(404).send({ error: "Simulation not found" });
+      return reply.send({
+        id: sim.id,
+        agentId: sim.agentId,
+        agentName: sim.agent.name,
+        dateRangeStart: sim.dateRangeStart.toISOString(),
+        dateRangeEnd: sim.dateRangeEnd.toISOString(),
+        maxMarkets: sim.maxMarkets,
+        durationMinutes: sim.durationMinutes,
+        status: sim.status,
+        createdAt: sim.createdAt.toISOString(),
+        markets: sim.enqueuedMarkets.map((e) => ({
+          marketId: e.marketId,
+          marketName: e.market?.name,
+          marketStatus: e.market?.status,
+          status: e.status,
+          discardReason: e.discardReason ?? undefined,
+        })),
+      });
+    }
+  );
 
   /** GET /api/simulate/balance?agentId= - Simulate chain balance for agent wallet (native + USDC). */
   app.get(
@@ -303,36 +402,33 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       }
       const rawMax = req.body?.maxMarkets;
       const rawDuration = req.body?.durationMinutes;
+      const maxMarketsNum =
+        typeof rawMax === "number" && Number.isFinite(rawMax)
+          ? rawMax
+          : typeof rawMax === "string" && rawMax.trim() !== ""
+            ? Number(rawMax)
+            : NaN;
       const maxMarketsForCap =
-        typeof rawMax === "number" && Number.isFinite(rawMax) && rawMax > 0
-          ? Math.min(Math.floor(rawMax), 500)
+        Number.isFinite(maxMarketsNum) && maxMarketsNum > 0
+          ? Math.min(Math.floor(maxMarketsNum), 500)
           : 50;
+      const durationNum =
+        typeof rawDuration === "number" && Number.isFinite(rawDuration)
+          ? rawDuration
+          : typeof rawDuration === "string" && rawDuration.trim() !== ""
+            ? Number(rawDuration)
+            : NaN;
       const durationMinutes =
-        typeof rawDuration === "number" && Number.isFinite(rawDuration) && rawDuration > 0
-          ? Math.max(1, Math.floor(rawDuration))
+        Number.isFinite(durationNum) && durationNum > 0
+          ? Math.max(1, Math.floor(durationNum))
           : 60;
       const x402Config = getX402Config();
-      if (!x402Config.receiverAddress?.trim()) {
-        return reply.code(200).send({
-          message: "oops x402 has an unexpected error please try again",
-        });
-      }
-      const paymentHeader =
-        (req.headers["payment-signature"] as string) ??
-        (req.headers["x-payment"] as string) ??
-        "";
-      if (!paymentHeader || String(paymentHeader).trim() === "") {
-        const resourceUrl =
-          typeof req.url === "string"
-            ? `${req.protocol}://${req.hostname}${req.url}`
-            : "/api/simulate/start";
-        const body402 = buildSimulatePaymentRequired(
-          resourceUrl,
-          maxMarketsForCap,
-          durationMinutes
-        );
-        if (body402) {
-          return reply.code(402).send(body402);
+      if (x402Config.enabled && x402Config.receiverAddress?.trim()) {
+        const amountUsdc = computeSimulatePriceUsdc(maxMarketsForCap, durationMinutes);
+        const amountAtomic = usdcToAtomic(amountUsdc);
+        const payResult = await paySimulateWithAgent(agentId, amountAtomic);
+        if (!payResult.ok) {
+          return reply.code(400).send({ error: payResult.error });
         }
       }
       const marketsInRange = await prisma.market.findMany({
@@ -352,37 +448,104 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         take: maxMarketsForCap,
         select: { id: true },
       });
+
+      const simulation = await prisma.simulation.create({
+        data: {
+          ownerId: agent.ownerId,
+          agentId,
+          dateRangeStart: rangeStart,
+          dateRangeEnd: rangeEnd,
+          maxMarkets: maxMarketsForCap,
+          durationMinutes,
+        },
+      });
+
       const jobIds: string[] = [];
       for (const m of marketsInRange) {
-        await prisma.agentEnqueuedMarket.upsert({
-          where: { agentId_marketId: { agentId, marketId: m.id } },
-          create: {
+        await prisma.agentEnqueuedMarket.create({
+          data: {
             agentId,
             marketId: m.id,
+            simulationId: simulation.id,
             chainKey: CHAIN_KEY_TENDERLY,
             simulateDateRangeStart: rangeStart,
             simulateDateRangeEnd: rangeEnd,
-          },
-          update: {
-            chainKey: CHAIN_KEY_TENDERLY,
-            simulateDateRangeStart: rangeStart,
-            simulateDateRangeEnd: rangeEnd,
-            status: "PENDING",
-            discardReason: null,
-            nextRunAt: null,
           },
         });
         const jobId = await enqueueAgentPredictionNow({
           agentId,
           marketId: m.id,
+          simulationId: simulation.id,
           chainKey: CHAIN_KEY_TENDERLY,
         });
         jobIds.push(jobId);
       }
+
       return reply.send({
+        simulationId: simulation.id,
         enqueued: marketsInRange.length,
         jobIds,
       });
+    }
+  );
+
+  /** POST /api/simulate/stop - Mark simulation as COMPLETED (timer ended) or CANCELLED (user stopped). Keeps Settings list in sync. */
+  app.post(
+    "/api/simulate/stop",
+    async (
+      req: FastifyRequest<{ Body: { simulationId?: string; cancelled?: boolean } }>,
+      reply: FastifyReply
+    ) => {
+      const user = requireUser(req);
+      if (!user?.userId) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const simulationId = req.body?.simulationId?.trim();
+      if (!simulationId) {
+        return reply.code(400).send({ error: "simulationId is required" });
+      }
+      const cancelled = req.body?.cancelled === true || req.body?.cancelled === "true";
+      const prisma = getPrismaClient();
+      const sim = await prisma.simulation.findFirst({
+        where: { id: simulationId, ownerId: user.userId },
+        select: { id: true, status: true },
+      });
+      if (!sim) {
+        return reply.code(404).send({ error: "Simulation not found" });
+      }
+      if (sim.status !== "RUNNING") {
+        return reply.send({ ok: true, status: sim.status });
+      }
+      const newStatus = cancelled ? "CANCELLED" : "COMPLETED";
+      await prisma.simulation.update({
+        where: { id: simulationId },
+        data: { status: newStatus },
+      });
+      return reply.send({ ok: true, status: newStatus });
+    }
+  );
+
+  /** DELETE /api/simulations/:id - Remove a simulation and its enqueued markets (cascade). Owner only. */
+  app.delete(
+    "/api/simulations/:id",
+    async (
+      req: FastifyRequest<{ Params: { id: string } }>,
+      reply: FastifyReply
+    ) => {
+      const user = requireUser(req);
+      if (!user?.userId) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const id = req.params.id?.trim();
+      if (!id) return reply.code(400).send({ error: "Simulation id required" });
+      const prisma = getPrismaClient();
+      const sim = await prisma.simulation.findFirst({
+        where: { id, ownerId: user.userId },
+        select: { id: true },
+      });
+      if (!sim) return reply.code(404).send({ error: "Simulation not found" });
+      await prisma.simulation.delete({ where: { id } });
+      return reply.code(204).send();
     }
   );
 }

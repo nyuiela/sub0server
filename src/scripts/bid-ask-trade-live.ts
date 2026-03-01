@@ -43,9 +43,9 @@ loadEnv();
 const BACKEND_PORT = process.env.PORT ?? "4000";
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${BACKEND_PORT}`;
 const API_KEY = process.env.API_KEY ?? "";
-const INTERVAL_MS = Math.max(5000, Number(process.env.BID_ASK_TRADE_INTERVAL_MS) || 60_000);
+const INTERVAL_MS = Math.max(50000, Number(process.env.BID_ASK_TRADE_INTERVAL_MS) || 60_000);
 const MARKETS_LIMIT = Math.max(1, Math.min(50, Number(process.env.BID_ASK_TRADE_MARKETS_LIMIT) || 10));
-const ORDER_DELAY_MS = Math.max(0, Number(process.env.BID_ASK_TRADE_ORDER_DELAY_MS) || 500);
+const ORDER_DELAY_MS = Math.max(0, Number(process.env.BID_ASK_TRADE_ORDER_DELAY_MS) || 100000);
 
 let shutdown = false;
 

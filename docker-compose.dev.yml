@@ -1,0 +1,39 @@
+# Dev overlay: run full stack with your code mounted so changes apply without rebuild.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up -d
+# Or: pnpm docker:dev
+# Backend and worker use tsx watch; edit code on host and they reload.
+# CI=true so pnpm install runs non-interactively in the container.
+
+services:
+  backend:
+    build:
+      context: .
+      target: dev
+    environment:
+      CI: "true"
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-${DATABASE_URL}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - backend_node_modules:/app/node_modules
+    command: ["/bin/sh", "-c", "pnpm install && pnpm run dev"]
+
+  agent-worker:
+    build:
+      context: .
+      target: dev
+    environment:
+      CI: "true"
+      DATABASE_URL: ${DATABASE_URL_DOCKER:-${DATABASE_URL}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+      - worker_node_modules:/app/node_modules
+    command: ["/bin/sh", "-c", "pnpm install && pnpm run worker:dev"]
+    restart: unless-stopped
+
+volumes:
+  backend_node_modules:
+  worker_node_modules:

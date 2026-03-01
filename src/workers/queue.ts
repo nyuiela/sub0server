@@ -10,6 +10,8 @@ let agentQueue: Queue<AgentJobPayload> | null = null;
 export interface AgentJobPayload {
   marketId: string;
   agentId: string;
+  /** When set, job belongs to this simulation run only (session-scoped). */
+  simulationId?: string;
   /** Trading place: main (CHAIN_RPC_URL) or tenderly (simulate). Default main. */
   chainKey?: AgentChainKey;
 }
@@ -37,8 +39,9 @@ export async function enqueueAgentPrediction(payload: AgentJobPayload): Promise<
 export async function enqueueAgentPredictionNow(payload: AgentJobPayload): Promise<string> {
   const queue = await getAgentQueue();
   const chainKey = payload.chainKey ?? CHAIN_KEY_MAIN;
+  const sim = payload.simulationId ?? "";
   const job = await queue.add("predict", { ...payload, chainKey }, {
-    jobId: `now-${payload.agentId}-${payload.marketId}-${Date.now()}`,
+    jobId: `now-${payload.agentId}-${payload.marketId}-${sim}-${Date.now()}`,
   });
   return job.id ?? "";
 }

@@ -48,6 +48,8 @@ export interface EngineOrder {
   userId?: string | null;
   agentId?: string | null;
   crePayload?: CreOrderPayload | null;
+  /** "main" = live; "tenderly" = simulate. Set for agent orders. */
+  chainKey?: string | null;
 }
 
 /**
@@ -66,6 +68,8 @@ export interface OrderInput {
   userId?: string | null;
   agentId?: string | null;
   crePayload?: CreOrderPayload | null;
+  /** "main" | "tenderly" for agent orders. */
+  chainKey?: string | null;
 }
 
 /**

@@ -57,12 +57,13 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  agents     Agent[]     @relation("UserToAgent")
-  trades     Trade[]
-  positions  Position[]
-  aiRequests AiRequest[]
-  vault      UserVault?
+  agents       Agent[]       @relation("UserToAgent")
+  trades       Trade[]
+  positions    Position[]
+  aiRequests   AiRequest[]
+  vault        UserVault?
   agentRegistrationsClaimed AgentRegistration[]
+  simulations  Simulation[]
 
   @@index([username])
 }
@@ -117,11 +118,33 @@ model Agent {
   enqueuedMarkets AgentEnqueuedMarket[]
   pendingTrades   PendingAgentTrade[]
   registrationClaimed AgentRegistration?
-  chainBalances  AgentChainBalance[]
+  chainBalances   AgentChainBalance[]
+  simulations     Simulation[]
 
   @@index([ownerId])
   @@index([status])
   @@index([templateId])
+}
+
+/// One paid simulation run: date range, max markets, duration. Scopes enqueued markets and jobs so runs do not mix.
+model Simulation {
+  id               String   @id @default(uuid())
+  ownerId          String
+  agentId          String
+  dateRangeStart   DateTime
+  dateRangeEnd     DateTime
+  maxMarkets       Int
+  durationMinutes  Int
+  status           String   @default("RUNNING") // RUNNING | COMPLETED | CANCELLED
+  createdAt        DateTime @default(now())
+
+  owner User  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  enqueuedMarkets AgentEnqueuedMarket[]
+
+  @@index([ownerId])
+  @@index([agentId])
+  @@index([createdAt])
 }
 
 /// Balance per trading place (main chain vs Tenderly simulate). One row per agent per chainKey.
@@ -162,11 +185,14 @@ model PendingAgentTrade {
 }
 
 /// Markets enqueued for an agent (add-to-agent on Markets page). Used to show "Added (N)" and persist across sessions.
+/// When simulationId is set, row belongs to that simulation run only (session-scoped). When null, main/trigger-all scope.
 /// status: PENDING until agent runs; DISCARDED when agent skips (with discardReason); TRADED when order submitted.
 model AgentEnqueuedMarket {
   id             String    @id @default(uuid())
   agentId        String
   marketId       String
+  /** When set, this row belongs to a specific simulation run. Null = main chain / non-simulate. */
+  simulationId   String?
   /** Trading place: "main" (CHAIN_RPC_URL) or "tenderly" (simulate). Default main. */
   chainKey       String    @default("main")
   status         String    @default("PENDING") // PENDING | DISCARDED | TRADED
@@ -179,13 +205,15 @@ model AgentEnqueuedMarket {
   updatedAt      DateTime  @updatedAt
   createdAt      DateTime  @default(now())
 
-  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  agent      Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market     Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  simulation Simulation? @relation(fields: [simulationId], references: [id], onDelete: Cascade)
 
-  @@unique([agentId, marketId])
+  @@unique([agentId, marketId, simulationId])
   @@index([agentId])
   @@index([marketId])
   @@index([chainKey])
+  @@index([simulationId])
 }
 
 /// OpenClaw long-form docs (soul, persona, skill, etc.) stored as Text for efficiency.
@@ -327,6 +355,8 @@ model Position {
   collateralLocked    Decimal        @db.Decimal(28, 18)
   isAmm               Boolean        @default(false)
   contractPositionId  String?       // Position/token id from smart contract
+  /// "main" = live chain; "tenderly" = simulate. Null = main (backfill).
+  chainKey            String?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -338,6 +368,7 @@ model Position {
   @@index([userId])
   @@index([agentId])
   @@index([address])
+  @@index([chainKey])
 }
 
 model Trade {
@@ -350,6 +381,8 @@ model Trade {
   amount       Decimal  @db.Decimal(28, 18)
   price        Decimal  @db.Decimal(28, 18)
   txHash       String?
+  /// "main" = live chain; "tenderly" = simulate. Null = main (backfill).
+  chainKey     String?
   createdAt    DateTime @default(now())
 
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -360,6 +393,7 @@ model Trade {
   @@index([marketId, outcomeIndex])
   @@index([userId])
   @@index([agentId])
+  @@index([chainKey])
 }
 
 model Order {
@@ -375,6 +409,8 @@ model Order {
   updatedAt    DateTime @updatedAt
   userId       String?
   agentId      String?
+  /// "main" = live chain; "tenderly" = simulate. Set for agent orders.
+  chainKey     String?
   /// CRE execution: for user orders, EIP-712 quote params + userSignature so we can POST to CRE on fill.
   crePayload   Json?
 
@@ -384,6 +420,7 @@ model Order {
   @@index([marketId, outcomeIndex])
   @@index([userId])
   @@index([agentId])
+  @@index([chainKey])
 }
 
 model News {

@@ -78,8 +78,14 @@ async function updateMakerOrderStatuses(
  * Apply each trade to buyer and seller positions for that outcome.
  * Buyer (BID taker or ASK maker): LONG position +quantity.
  * Seller (ASK maker or BID taker): LONG -quantity or SHORT +quantity.
+ * chainKey isolates simulate (tenderly) from live (main) positions.
  */
-async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrade[]): Promise<void> {
+async function applyTradesToPositions(
+  prisma: PrismaClient,
+  trades: ExecutedTrade[],
+  chainKey: string | null
+): Promise<void> {
+  const positionChainKey = chainKey ?? "main";
   for (const t of trades) {
     const qty = new Decimal(t.quantity);
     const price = new Decimal(t.price);
@@ -104,6 +110,11 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
         ? outcomePositionIds[t.outcomeIndex] ?? null
         : null;
 
+    const positionWhereChain =
+      positionChainKey === "main"
+        ? { OR: [{ chainKey: "main" }, { chainKey: null }] as const }
+        : { chainKey: positionChainKey };
+
     if (buyerAddress) {
       const existing = await prisma.position.findFirst({
         where: {
@@ -112,6 +123,7 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
           address: buyerAddress,
           side: "LONG",
           status: "OPEN",
+          ...positionWhereChain,
         },
       });
       const newLocked = existing
@@ -148,6 +160,7 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
             avgPrice: newAvg.toFixed(18),
             collateralLocked: newLocked.toFixed(18),
             isAmm: false,
+            chainKey: positionChainKey,
           },
         });
       }
@@ -161,6 +174,7 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
           address: sellerAddress,
           side: "LONG",
           status: "OPEN",
+          ...positionWhereChain,
         },
       });
       if (longPos) {
@@ -190,6 +204,7 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
                 avgPrice: price.toFixed(18),
                 collateralLocked: after.abs().toFixed(18),
                 isAmm: false,
+                chainKey: positionChainKey,
               },
             });
           }
@@ -217,6 +232,7 @@ async function applyTradesToPositions(prisma: PrismaClient, trades: ExecutedTrad
             avgPrice: price.toFixed(18),
             collateralLocked: qty.toFixed(18),
             isAmm: false,
+            chainKey: positionChainKey,
           },
         });
       }
@@ -320,6 +336,8 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
 
   const now = new Date();
 
+  const orderChainKey = order?.chainKey ?? null;
+
   if (order) {
     await prisma.order.upsert({
       where: { id: order.id },
@@ -336,6 +354,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
         updatedAt: now,
         userId: order.userId ?? undefined,
         agentId: order.agentId ?? undefined,
+        chainKey: orderChainKey ?? undefined,
         crePayload: order.crePayload != null ? (order.crePayload as object) : undefined,
       },
       update: {
@@ -359,13 +378,23 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
       side: t.side,
       amount: t.quantity,
       price: t.price,
+      chainKey: orderChainKey ?? undefined,
       createdAt: new Date(t.executedAt),
     })),
     skipDuplicates: true,
   });
 
   await updateMakerOrderStatuses(prisma, trades);
-  await applyTradesToPositions(prisma, trades);
+  await applyTradesToPositions(prisma, trades, orderChainKey);
+
+  const positionMarketIds = [...new Set(trades.map((t: ExecutedTrade) => t.marketId))];
+  const redis = await getRedisPublisher();
+  for (const marketId of positionMarketIds) {
+    await redis.publish(
+      REDIS_CHANNELS.MARKET_UPDATES,
+      JSON.stringify({ marketId, reason: "position" })
+    );
+  }
 
   await executeCreTrades(prisma, order, trades);
 
@@ -384,7 +413,6 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
       where: { id: { in: marketIds } },
       select: { id: true, volume: true },
     });
-    const redis = await getRedisPublisher();
     for (const m of updated) {
       await redis.publish(
         REDIS_CHANNELS.MARKET_UPDATES,

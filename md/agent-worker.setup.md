@@ -224,3 +224,37 @@ Everything under the **Simulate** surface that talks to a chain uses **strictly 
 - **Simulate funding** (`POST /api/simulate/fund`) – 0.1 ETH + 20,000 USDC are set/added on the Tenderly chain via Tenderly Admin RPC.
 
 So: balance display, funding, and network info on the Simulate page all use the Tenderly Virtual TestNet only. The agent worker and order matching engine do not switch chain by context; the worker uses **Agent.balance** from the DB (which we set after simulate funding so Run analysis can pass the balance check). For a fully Tenderly-based Simulate flow, use Tenderly for funding and avoid syncing agent balance from the main chain so the worker keeps using the simulated balance.
+
+---
+
+## Queue location and reset
+
+Agent-worker jobs are stored in **BullMQ** under the queue name **`agent-prediction`**, backed by **Redis** (the same instance configured via `REDIS_URL` in `sub0server/.env`). The queue is obtained in code via `getAgentQueue()` in `sub0server/src/workers/queue.ts`.
+
+**To clear or reset jobs** (e.g. after deleting DB data, or to stop old simulation jobs):
+
+1. **Script (recommended):** From `sub0server` run:
+
+   ```bash
+   pnpm queue:reset
+   ```
+
+   This runs `src/scripts/reset-agent-queue.ts`: it obliterates the queue (all jobs and repeatable config removed). Uses `REDIS_URL` from `.env`.
+
+2. **From code:** You can also use the BullMQ Queue API directly:
+
+   ```ts
+   import { getAgentQueue } from "./workers/queue.js";
+   const queue = await getAgentQueue();
+   await queue.obliterate({ force: true });
+   ```
+
+2. **Drain without deleting the queue:** To remove only waiting/delayed jobs and keep the queue definition:
+
+   ```ts
+   await queue.drain(); // removes waiting jobs
+   ```
+
+3. **Redis CLI:** If you have direct Redis access, you can inspect or flush keys used by BullMQ for the queue (keys are prefixed with the queue name). Prefer the BullMQ API to avoid leaving the queue in an inconsistent state.
+
+After a reset, the worker can keep running; new jobs will be added when you trigger "Run analysis" or when the backend enqueues jobs (e.g. from simulate/start or trigger-all).

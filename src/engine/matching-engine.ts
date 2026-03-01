@@ -213,6 +213,7 @@ export class OrderBook {
         userId: input.userId,
         agentId: input.agentId,
         crePayload: input.crePayload ?? null,
+        chainKey: input.chainKey ?? null,
       };
       return { order: rejected, trades: [], orderBookSnapshot: emptySnapshot };
     }
@@ -237,6 +238,7 @@ export class OrderBook {
         userId: input.userId,
         agentId: input.agentId,
         crePayload: input.crePayload ?? null,
+        chainKey: input.chainKey ?? null,
       };
       return { order: rejected, trades: [], orderBookSnapshot: emptySnapshot };
     }
@@ -257,6 +259,7 @@ export class OrderBook {
       userId: input.userId,
       agentId: input.agentId,
       crePayload: input.crePayload ?? null,
+      chainKey: input.chainKey ?? null,
     };
 
     const trades: ExecutedTrade[] = [];

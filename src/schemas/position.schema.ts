@@ -22,12 +22,18 @@ export const positionUpdateSchema = z.object({
   contractPositionId: z.string().min(1).optional().nullable(),
 });
 
+const chainKeyEnum = z.enum(["main", "tenderly"]);
+
 export const positionQuerySchema = z.object({
   marketId: z.string().uuid().optional(),
   userId: z.string().uuid().optional(),
   agentId: z.string().uuid().optional(),
   address: z.string().optional(),
   status: positionStatusEnum.optional(),
+  /** "main" = live (default); "tenderly" = simulate. Omit or "main" returns main + legacy null chainKey. */
+  chainKey: chainKeyEnum.optional().default("main"),
+  /** When true and agentId is set, each position includes lastReason (brief agent reasoning/action). */
+  includeLatestReason: z.coerce.boolean().optional().default(false),
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
   offset: z.coerce.number().int().min(0).optional().default(0),
 });

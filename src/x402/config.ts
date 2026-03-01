@@ -16,18 +16,23 @@ export const USDC_BASE_MAINNET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 export interface X402Config {
   /** Chain id for payment (e.g. 84532 Base Sepolia, 8453 Base mainnet). */
   chainId: number;
+  /** RPC URL for the payment chain (agent pays from this chain). */
+  rpcUrl: string;
   /** USDC contract address on the payment chain. */
   usdcAddress: string;
   /** Address that receives simulation payments (must have valid checksum). */
   receiverAddress: string;
-  /** Whether x402 is enabled (receiver set and chain configured). */
+  /** Whether x402 is enabled (receiver and RPC configured). */
   enabled: boolean;
 }
+
+const BASE_SEPOLIA_RPC = "https://sepolia.base.org";
 
 function getConfig(): X402Config {
   const chainIdRaw = optionalEnv("X402_CHAIN_ID", "84532");
   const chainId = Math.max(1, parseInt(chainIdRaw, 10) || 84532);
   const isMainnet = chainId === 8453;
+  const rpcUrl = optionalEnv("X402_RPC_URL", isMainnet ? "https://mainnet.base.org" : BASE_SEPOLIA_RPC);
   const usdcAddress = optionalEnv(
     "X402_USDC_ADDRESS",
     isMainnet ? USDC_BASE_MAINNET : USDC_BASE_SEPOLIA
@@ -35,9 +40,10 @@ function getConfig(): X402Config {
   const receiverAddress = optionalEnv("X402_RECEIVER_ADDRESS", "");
   return {
     chainId,
+    rpcUrl,
     usdcAddress,
     receiverAddress,
-    enabled: receiverAddress.length > 0,
+    enabled: receiverAddress.length > 0 && rpcUrl.length > 0,
   };
 }
 

@@ -42,16 +42,21 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
-    const { marketId, userId, agentId, address, status, limit, offset } = parsed.data;
+    const { marketId, userId, agentId, address, status, chainKey, includeLatestReason, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
     const hasOwnerFilter = userId ?? agentId ?? address;
     const platformAddr = config.platformLiquidityAddress?.trim();
+    const chainWhere =
+      chainKey === "main"
+        ? { OR: [{ chainKey: "main" }, { chainKey: null }] as const }
+        : { chainKey: "tenderly" as const };
     const where = {
       ...(marketId ? { marketId } : {}),
       ...(userId ? { userId } : {}),
       ...(agentId ? { agentId } : {}),
       ...(address ? { address } : {}),
       ...(status ? { status } : {}),
+      ...chainWhere,
       ...(!hasOwnerFilter && platformAddr ? { address: { not: platformAddr } } : {}),
     };
     const [positions, total] = await Promise.all([
@@ -64,8 +69,34 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       }),
       prisma.position.count({ where }),
     ]);
+
+    let reasonByMarket: Map<string, string> = new Map();
+    if (includeLatestReason && agentId && positions.length > 0) {
+      const marketIds = [...new Set(positions.map((p) => p.marketId))];
+      const reasons = await prisma.agentReasoning.findMany({
+        where: { agentId, marketId: { in: marketIds } },
+        orderBy: { createdAt: "desc" },
+        select: { marketId: true, reasoning: true, actionTaken: true },
+      });
+      for (const r of reasons) {
+        if (!r.marketId || reasonByMarket.has(r.marketId)) continue;
+        const brief =
+          (r.actionTaken?.trim().slice(0, 120) ?? null) ||
+          (r.reasoning?.trim().slice(0, 120) ?? null) ||
+          null;
+        if (brief) reasonByMarket.set(r.marketId, brief);
+      }
+    }
+
     return reply.send({
-      data: positions.map((p) => ({ ...serializePosition(p), market: p.market })),
+      data: positions.map((p) => {
+        const out = { ...serializePosition(p), market: p.market } as ReturnType<typeof serializePosition> & { market: typeof positions[0]["market"]; lastReason?: string };
+        if (includeLatestReason && agentId) {
+          const reason = reasonByMarket.get(p.marketId);
+          if (reason) out.lastReason = reason;
+        }
+        return out;
+      }),
       total,
       limit,
       offset,

@@ -6,7 +6,8 @@ import { requireUser, requireApiKey } from "../lib/auth.js";
 import { config } from "../config/index.js";
 import { requestCreCreateAgentKey } from "../lib/cre-create-agent-key.js";
 import { generateAgentKeys } from "../services/agent-keys.service.js";
-import { syncAgentBalance } from "../services/agent-balance.service.js";
+import { syncAgentBalance, syncTenderlyBalance } from "../services/agent-balance.service.js";
+import { CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
 import {
   agentCreateSchema,
   agentUpdateSchema,
@@ -146,7 +147,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
           owner: { select: { id: true, address: true } },
           strategy: true,
           template: { select: { id: true, name: true } },
-          enqueuedMarkets: { select: { marketId: true } },
+          enqueuedMarkets: { where: { simulationId: null }, select: { marketId: true } },
         },
       }),
       prisma.agent.count({ where }),
@@ -220,7 +221,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
         strategy: true,
         template: { select: { id: true, name: true } },
         openclaw: true,
-        enqueuedMarkets: { select: { marketId: true } },
+        enqueuedMarkets: { where: { simulationId: null }, select: { marketId: true } },
       },
     });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
@@ -236,13 +237,13 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(payload);
   });
 
-  /** GET /api/agents/:id/enqueued-markets - List enqueued markets with status and market name (for Discovery). */
+  /** GET /api/agents/:id/enqueued-markets - List enqueued markets with status and market name. Main: simulationId null. Simulate: pass simulationId to get that run's list. */
   app.get(
     "/api/agents/:id/enqueued-markets",
     async (
       req: FastifyRequest<{
         Params: { id: string };
-        Querystring: { limit?: string; offset?: string };
+        Querystring: { limit?: string; offset?: string; chainKey?: string; simulationId?: string };
       }>,
       reply: FastifyReply
     ) => {
@@ -250,16 +251,23 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       const agentId = req.params.id;
       const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
       const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
+      const chainKey = req.query.chainKey === "tenderly" ? "tenderly" : "main";
+      const simulationIdParam = req.query.simulationId?.trim() ?? null;
+      const simulationId =
+        chainKey === "tenderly" && simulationIdParam
+          ? simulationIdParam
+          : null;
+      const where = { agentId, chainKey, simulationId };
       const prisma = getPrismaClient();
       const [rows, total] = await Promise.all([
         prisma.agentEnqueuedMarket.findMany({
-          where: { agentId },
+          where,
           include: { market: { select: { name: true } } },
           orderBy: { createdAt: "desc" },
           take: limit,
           skip: offset,
         }),
-        prisma.agentEnqueuedMarket.count({ where: { agentId } }),
+        prisma.agentEnqueuedMarket.count({ where }),
       ]);
       const data = rows.map((r) => ({
         marketId: r.marketId,
@@ -289,8 +297,8 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
-  /** Sync agent USDC/collateral balance from chain; update DB if different and broadcast AGENT_UPDATED. */
-  app.post("/api/agents/:id/sync-balance", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  /** Sync agent USDC/collateral balance from chain; update DB if different and broadcast AGENT_UPDATED. Body: { chainKey?: "main" | "tenderly" } for simulate balance. */
+  app.post("/api/agents/:id/sync-balance", async (req: FastifyRequest<{ Params: { id: string }; Body: { chainKey?: string } }>, reply: FastifyReply) => {
     if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const agentId = req.params.id;
     const prisma = getPrismaClient();
@@ -299,7 +307,10 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       select: { id: true },
     });
     if (!agent) return reply.code(404).send({ error: "Agent not found" });
-    const result = await syncAgentBalance(agentId);
+    const chainKey = req.body?.chainKey === CHAIN_KEY_TENDERLY ? CHAIN_KEY_TENDERLY : undefined;
+    const result = chainKey === CHAIN_KEY_TENDERLY
+      ? await syncTenderlyBalance(agentId)
+      : await syncAgentBalance(agentId);
     return reply.send({
       balance: result.balance,
       updated: result.updated,
