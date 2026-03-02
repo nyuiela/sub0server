@@ -70,6 +70,21 @@ CREATE TABLE "Agent" (
 );
 
 -- CreateTable
+CREATE TABLE "Simulation" (
+    "id" TEXT NOT NULL,
+    "ownerId" TEXT NOT NULL,
+    "agentId" TEXT NOT NULL,
+    "dateRangeStart" TIMESTAMP(3) NOT NULL,
+    "dateRangeEnd" TIMESTAMP(3) NOT NULL,
+    "maxMarkets" INTEGER NOT NULL,
+    "durationMinutes" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'RUNNING',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Simulation_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "AgentChainBalance" (
     "id" TEXT NOT NULL,
     "agentId" TEXT NOT NULL,
@@ -102,10 +117,13 @@ CREATE TABLE "AgentEnqueuedMarket" (
     "id" TEXT NOT NULL,
     "agentId" TEXT NOT NULL,
     "marketId" TEXT NOT NULL,
+    "simulationId" TEXT,
     "chainKey" TEXT NOT NULL DEFAULT 'main',
     "status" TEXT NOT NULL DEFAULT 'PENDING',
     "discardReason" TEXT,
     "nextRunAt" TIMESTAMP(3),
+    "simulateDateRangeStart" TIMESTAMP(3),
+    "simulateDateRangeEnd" TIMESTAMP(3),
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -184,8 +202,9 @@ CREATE TABLE "Market" (
     "oracleAddress" TEXT NOT NULL,
     "status" "MarketStatus" NOT NULL DEFAULT 'OPEN',
     "collateralToken" TEXT NOT NULL,
-    "conditionId" TEXT NOT NULL,
+    "conditionId" TEXT,
     "questionId" TEXT,
+    "createMarketTxHash" TEXT,
     "platform" "MarketPlatform" NOT NULL DEFAULT 'NATIVE',
     "agentSource" TEXT,
     "settlementRules" TEXT,
@@ -227,6 +246,7 @@ CREATE TABLE "Position" (
     "collateralLocked" DECIMAL(28,18) NOT NULL,
     "isAmm" BOOLEAN NOT NULL DEFAULT false,
     "contractPositionId" TEXT,
+    "chainKey" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -244,6 +264,7 @@ CREATE TABLE "Trade" (
     "amount" DECIMAL(28,18) NOT NULL,
     "price" DECIMAL(28,18) NOT NULL,
     "txHash" TEXT,
+    "chainKey" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Trade_pkey" PRIMARY KEY ("id")
@@ -263,6 +284,7 @@ CREATE TABLE "Order" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "userId" TEXT,
     "agentId" TEXT,
+    "chainKey" TEXT,
     "crePayload" JSONB,
 
     CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
@@ -412,6 +434,15 @@ CREATE INDEX "Agent_status_idx" ON "Agent"("status");
 CREATE INDEX "Agent_templateId_idx" ON "Agent"("templateId");
 
 -- CreateIndex
+CREATE INDEX "Simulation_ownerId_idx" ON "Simulation"("ownerId");
+
+-- CreateIndex
+CREATE INDEX "Simulation_agentId_idx" ON "Simulation"("agentId");
+
+-- CreateIndex
+CREATE INDEX "Simulation_createdAt_idx" ON "Simulation"("createdAt");
+
+-- CreateIndex
 CREATE INDEX "AgentChainBalance_agentId_idx" ON "AgentChainBalance"("agentId");
 
 -- CreateIndex
@@ -439,7 +470,10 @@ CREATE INDEX "AgentEnqueuedMarket_marketId_idx" ON "AgentEnqueuedMarket"("market
 CREATE INDEX "AgentEnqueuedMarket_chainKey_idx" ON "AgentEnqueuedMarket"("chainKey");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "AgentEnqueuedMarket_agentId_marketId_key" ON "AgentEnqueuedMarket"("agentId", "marketId");
+CREATE INDEX "AgentEnqueuedMarket_simulationId_idx" ON "AgentEnqueuedMarket"("simulationId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AgentEnqueuedMarket_agentId_marketId_simulationId_key" ON "AgentEnqueuedMarket"("agentId", "marketId", "simulationId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "AgentOpenClaw_agentId_key" ON "AgentOpenClaw"("agentId");
@@ -499,6 +533,9 @@ CREATE INDEX "Position_agentId_idx" ON "Position"("agentId");
 CREATE INDEX "Position_address_idx" ON "Position"("address");
 
 -- CreateIndex
+CREATE INDEX "Position_chainKey_idx" ON "Position"("chainKey");
+
+-- CreateIndex
 CREATE INDEX "Trade_marketId_idx" ON "Trade"("marketId");
 
 -- CreateIndex
@@ -511,6 +548,9 @@ CREATE INDEX "Trade_userId_idx" ON "Trade"("userId");
 CREATE INDEX "Trade_agentId_idx" ON "Trade"("agentId");
 
 -- CreateIndex
+CREATE INDEX "Trade_chainKey_idx" ON "Trade"("chainKey");
+
+-- CreateIndex
 CREATE INDEX "Order_marketId_idx" ON "Order"("marketId");
 
 -- CreateIndex
@@ -521,6 +561,9 @@ CREATE INDEX "Order_userId_idx" ON "Order"("userId");
 
 -- CreateIndex
 CREATE INDEX "Order_agentId_idx" ON "Order"("agentId");
+
+-- CreateIndex
+CREATE INDEX "Order_chainKey_idx" ON "Order"("chainKey");
 
 -- CreateIndex
 CREATE INDEX "News_marketId_idx" ON "News"("marketId");
@@ -580,6 +623,12 @@ ALTER TABLE "Agent" ADD CONSTRAINT "Agent_ownerId_fkey" FOREIGN KEY ("ownerId") 
 ALTER TABLE "Agent" ADD CONSTRAINT "Agent_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "Template"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Simulation" ADD CONSTRAINT "Simulation_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Simulation" ADD CONSTRAINT "Simulation_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "AgentChainBalance" ADD CONSTRAINT "AgentChainBalance_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -593,6 +642,9 @@ ALTER TABLE "AgentEnqueuedMarket" ADD CONSTRAINT "AgentEnqueuedMarket_agentId_fk
 
 -- AddForeignKey
 ALTER TABLE "AgentEnqueuedMarket" ADD CONSTRAINT "AgentEnqueuedMarket_marketId_fkey" FOREIGN KEY ("marketId") REFERENCES "Market"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AgentEnqueuedMarket" ADD CONSTRAINT "AgentEnqueuedMarket_simulationId_fkey" FOREIGN KEY ("simulationId") REFERENCES "Simulation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "AgentOpenClaw" ADD CONSTRAINT "AgentOpenClaw_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;

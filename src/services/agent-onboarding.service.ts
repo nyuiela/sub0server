@@ -7,19 +7,24 @@ import { createRequire } from "module";
 import type { FastifyBaseLogger } from "fastify";
 import { createPublicClient, createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { sepolia } from "viem/chains";
+import { baseSepolia, sepolia } from "viem/chains";
 import { config } from "../config/index.js";
 
 const require = createRequire(import.meta.url);
 const contractsData = require("../lib/contracts.json") as {
+  chainId: number;
+  chainRpcUrl: string;
+  baseSepoliaRpcUrl: string;
   contracts?: { usdc?: string; conditionalTokens?: string; predictionVault?: string };
+  platform?: { creatorAddress?: string; oracleAddress?: string; usdcAddress?: string; initialLiquidityPerOutcome?: string };
+  eip712?: { domainName?: string; domainVersion?: string; quoteTypeName?: string };
+  conventions?: { usdcDecimals?: number; outcomeTokenDecimals?: number; parentCollectionId?: string };
 };
 const contracts = contractsData;
-const USDC_ADDRESS = contracts.contracts?.usdc ?? "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
-const CT_ADDRESS =
-  contracts.contracts?.conditionalTokens ?? "0xB01f9A7824fc1ffEF9c428AA8C0225b0e308a4F4";
-const PREDICTION_VAULT_ADDRESS =
-  contracts.contracts?.predictionVault ?? "0x37Ad1be17Be247854F9D4F8Af95eeEFFDe0b179E";
+const USDC_ADDRESS = contracts.contracts?.usdc;
+const BASE_USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+const CT_ADDRESS = contracts.contracts?.conditionalTokens;
+const PREDICTION_VAULT_ADDRESS = contracts.contracts?.predictionVault;
 
 const MAX_U256 = 2n ** 256n - 1n;
 
@@ -34,6 +39,18 @@ const ERC20_APPROVE_ABI = [
     outputs: [{ name: "", type: "bool", internalType: "bool" }],
     stateMutability: "nonpayable" as const,
   },
+] as const;
+
+const BASE_ERC20 = [
+  {
+    type: "function" as const,
+    name: "transfer",
+    inputs: [
+      { name: "to", type: "address", internalType: "address" },
+      { name: "amount", type: "uint256", internalType: "uint256" },
+    ],
+    stateMutability: "nonpayable" as const,
+  }
 ] as const;
 
 const ERC1155_SET_APPROVAL_FOR_ALL_ABI = [
@@ -85,6 +102,7 @@ export async function executeAgentOnboarding(
   log?: FastifyBaseLogger
 ): Promise<AgentOnboardingResult> {
   const rpcUrl = config.chainRpcUrl;
+  const baseSepoliaRpcUrl = contracts.baseSepoliaRpcUrl;
   const funderPk = config.contractPrivateKey;
   if (!rpcUrl?.trim()) {
     log?.warn("agentOnboarding: Chain RPC not configured");
@@ -110,6 +128,19 @@ export async function executeAgentOnboarding(
       chain: sepolia,
       transport: http(rpcUrl),
     });
+    const funderWalletBase = createWalletClient({
+      account: funderAccount,
+      chain: baseSepolia,
+      transport: http(contracts.baseSepoliaRpcUrl),
+    });
+    const hash = await funderWalletBase.sendTransaction({
+      to: agentAddress as Hex,
+      value: config.agentOnboardingEthWei,
+    });
+    // await client.waitForTransactionReceipt({ hash });
+    result.ethTransfer = { hash };
+    log?.info({ hash }, "agentOnboarding: ETH tx confirmed");
+
     log?.info(
       { to: agentAddress, wei: config.agentOnboardingEthWei.toString() },
       "agentOnboarding: sending ETH to agent"
@@ -119,6 +150,14 @@ export async function executeAgentOnboarding(
         to: agentAddress as Hex,
         value: config.agentOnboardingEthWei,
       });
+
+      const hash2 = await funderWallet.writeContract({
+        address: BASE_USDC_ADDRESS as Hex,
+        abi: BASE_ERC20,
+        functionName: "transfer",
+        args: [agentAddress as Hex, 2000000n],
+      });
+      // await client.waitForTransactionReceipt({ hash2 });
       log?.info({ hash }, "agentOnboarding: ETH tx sent, waiting for receipt");
       await client.waitForTransactionReceipt({ hash });
       result.ethTransfer = { hash };
@@ -138,6 +177,7 @@ export async function executeAgentOnboarding(
       functionName: "approve",
       args: [PREDICTION_VAULT_ADDRESS as Hex, MAX_U256],
     });
+
     await client.waitForTransactionReceipt({ hash });
     result.erc20Approve = { hash };
     log?.info({ hash }, "agentOnboarding: USDC approve confirmed");
