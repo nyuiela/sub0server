@@ -7,6 +7,7 @@ import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { getAgentBalanceForChain } from "../lib/agent-chain-balance.js";
 import { runTradingAnalysis } from "../services/agent-trading-analysis.service.js";
+import { createOrUpdateAgentPosition } from "../services/agent-position-creation.service.js";
 import { CRE_PENDING_PUBLIC_KEY, CRE_PENDING_PRIVATE_KEY } from "../schemas/agent.schema.js";
 import type { AgentChainKey } from "../types/agent-chain.js";
 import { CHAIN_KEY_MAIN, CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
@@ -231,6 +232,30 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     simulationContext,
     currentPositions,
   });
+
+  // Create/update position based on agent decision BEFORE order submission
+  const marketContext = {
+    marketName: market.name,
+    outcomes,
+    agentName: agent.name,
+    personaSummary: personaSummary ?? agent.persona?.slice(0, 500),
+    model: modelSettings?.model,
+    simulationContext,
+    currentPositions,
+  };
+
+  try {
+    await createOrUpdateAgentPosition({
+      agentId,
+      marketId,
+      decision,
+      marketContext,
+      chainKey,
+    });
+  } catch (err) {
+    console.error(`Failed to create/update position for agent ${agentId}, market ${marketId}:`, err);
+    // Continue with order submission even if position creation fails
+  }
 
   if (decision.action === "skip") {
     console.log(`Decision: skip. ${decision.reason ?? ""}`);
