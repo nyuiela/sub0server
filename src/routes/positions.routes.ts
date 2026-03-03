@@ -29,8 +29,8 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
     }
     const { marketId, userId, agentId, address, status, chainKey, includeLatestReason, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
-    const hasOwnerFilter = userId ?? agentId ?? address;
-    const platformAddr = config.platformLiquidityAddress?.trim();
+    // const hasOwnerFilter = userId ?? agentId ?? address;
+    // const platformAddr = config.platformLiquidityAddress?.trim();
     const chainWhere =
       chainKey === "main"
         ? { OR: [{ chainKey: "main" }, { chainKey: null }] }
@@ -42,7 +42,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       ...(address ? { address } : {}),
       ...(status ? { status } : {}),
       ...chainWhere,
-      ...(!hasOwnerFilter && platformAddr ? { address: { not: platformAddr } } : {}),
+      // ...(!hasOwnerFilter && platformAddr ? { address: { not: platformAddr } } : {}),
     };
     const [positions, total] = await Promise.all([
       prisma.position.findMany({

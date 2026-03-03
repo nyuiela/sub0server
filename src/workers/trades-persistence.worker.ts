@@ -266,7 +266,7 @@ async function executeCreTrades(
     const payload = order.crePayload as CreOrderPayload;
     if (payload.userSignature) {
       // const result = await executeUserTradeOnCre(payload);
-      await executeUserMarketTradeOnCre(payload, order.side);
+      const result = await executeUserMarketTradeOnCre(payload, order.side);
 
       if (!result.ok) {
         console.warn(`CRE user trade failed (order ${order.id}):`, result.error);
