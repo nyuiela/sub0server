@@ -429,9 +429,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
 
   await executeCreTrades(prisma, order, trades);
 
-  console.log("trades", trades);
   const volumeDeltas = volumeDeltaByMarket(trades);
-  console.log("volumeDeltas", volumeDeltas);
   const marketIds = [...volumeDeltas.keys()];
   for (const marketId of marketIds) {
     const delta = volumeDeltas.get(marketId) ?? 0;

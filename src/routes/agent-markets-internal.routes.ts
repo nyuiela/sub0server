@@ -70,17 +70,24 @@ function rawUsdcToDecimalString(raw: bigint): string {
   return intPart.toString();
 }
 
-const GET_MARKET_RETRY_MS = 3_000;
-const GET_MARKET_RETRIES = 5;
+const GET_MARKET_RETRY_MS = 1_000;
+const GET_MARKET_RETRIES = 10;
+const GET_MARKET_INITIAL_DELAY_MS = 5_000;
 
 async function getMarketFromChainWithRetry(
   questionId: string
 ): Promise<Awaited<ReturnType<typeof getMarketFromChain>>> {
+  // Add initial delay to let CRE process the transaction
+  await new Promise((r) => setTimeout(r, GET_MARKET_INITIAL_DELAY_MS));
+  
   for (let i = 0; i < GET_MARKET_RETRIES; i++) {
     const result = await getMarketFromChain(questionId);
     if (result) return result;
+    
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+    const backoffMs = GET_MARKET_RETRY_MS * Math.pow(2, i);
     if (i < GET_MARKET_RETRIES - 1) {
-      await new Promise((r) => setTimeout(r, GET_MARKET_RETRY_MS));
+      await new Promise((r) => setTimeout(r, backoffMs));
     }
   }
   return null;
@@ -165,7 +172,10 @@ async function createMarketFromOnchainResult(
 
   if (!chainMarket) {
     throw new Error(
-      "Market not found on chain (getMarket). Ensure CHAIN_RPC_URL is set and points to the same chain CRE used; market may need a few seconds to be visible."
+      `Market not found on chain after ${GET_MARKET_RETRIES} retries. ` +
+      `Question ID: ${questionId}. ` +
+      `This usually means the market needs more time to be indexed. ` +
+      `Try again in a few seconds or check if the transaction is still pending.`
     );
   }
   const conditionId = chainMarket.conditionId;
