@@ -45,6 +45,17 @@ enum StrategyPref {
   HYBRID
 }
 
+enum PendingAgentTradeStatus {
+  PENDING
+  FULFILLED
+  CANCELLED
+}
+
+enum OrderSide {
+  BID
+  ASK
+}
+
 model User {
   id          String   @id @default(uuid())
   username    String?  @unique
@@ -168,13 +179,14 @@ model PendingAgentTrade {
   agentId      String
   marketId     String
   outcomeIndex Int      @default(0)
-  side         String   // BID | ASK
+  side         OrderSide
   quantity     Decimal  @db.Decimal(28, 18)
-  status       String   @default("PENDING") // PENDING | FULFILLED | CANCELLED
+  status       PendingAgentTradeStatus   @default(PENDING)
   pendingReason String  // NO_WALLET | INSUFFICIENT_BALANCE
   orderId      String?  // set when later fulfilled
   createdAt    DateTime @default(now())
   fulfilledAt  DateTime?
+  tradeReason  String
 
   agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
   market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
@@ -204,6 +216,7 @@ model AgentEnqueuedMarket {
   simulateDateRangeEnd   DateTime?
   updatedAt      DateTime  @updatedAt
   createdAt      DateTime  @default(now())
+  tradeReason    String
 
   agent      Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
   market     Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
@@ -304,8 +317,10 @@ model Market {
   liquidity           Decimal?        @db.Decimal(28, 8)
   confidence          Float?
   pnl                 Decimal?       @db.Decimal(28, 8)
+  liquiditySeeded     Boolean        @default(false)
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
+  tradeReason         String         @default("No reason")
 
   trades    Trade[]
   positions Position[]

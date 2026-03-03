@@ -9,15 +9,17 @@ import { sepolia } from "viem/chains";
 import { config } from "../config/index.js";
 
 let publicClient: ReturnType<typeof createPublicClient> | null = null;
+let cachedRpcUrl: string | null = null;
 
 function getClient(): ReturnType<typeof createPublicClient> | null {
-  const rpcUrl = config.chainRpcUrl;
+  const rpcUrl = config.chainRpcUrl ?? null;
   if (!rpcUrl?.trim()) return null;
-  if (publicClient === null) {
+  if (publicClient === null || cachedRpcUrl !== rpcUrl) {
     publicClient = createPublicClient({
       chain: sepolia,
       transport: http(rpcUrl),
     });
+    cachedRpcUrl = rpcUrl;
   }
   return publicClient;
 }

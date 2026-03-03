@@ -28,7 +28,8 @@ import {
   type OnchainMarketCreatedBatchInput,
   type AgentMarketsQueryInput,
 } from "../schemas/agent-markets.schema.js";
-import contracts from "../lib/contracts.json" with { type: "json" };
+import contracts from "../lib/contracts.json" assert { type: "json" };
+
 
 function serializeMarket(market: {
   id: string;
@@ -45,6 +46,7 @@ function serializeMarket(market: {
   createMarketTxHash?: string | null;
   platform?: string;
   liquidity?: { toString(): string } | null;
+  liquiditySeeded?: boolean;
   createdAt: Date;
   updatedAt: Date;
   agentSource?: string | null;
@@ -55,6 +57,7 @@ function serializeMarket(market: {
     volume: market.volume.toString(),
     resolutionDate: market.resolutionDate.toISOString(),
     liquidity: market.liquidity?.toString() ?? null,
+    liquiditySeeded: market.liquiditySeeded ?? false,
   };
 }
 
@@ -219,6 +222,7 @@ async function createMarketFromOnchainResult(
       agentSource: body.agentSource ?? null,
       volume: initialLiquidity,
       liquidity: initialLiquidity,
+      liquiditySeeded: seeded,
     },
   });
 

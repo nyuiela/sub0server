@@ -120,8 +120,13 @@ export async function executeAgentOnboarding(
     chain: sepolia,
     transport: http(rpcUrl),
   });
+  const agentWalletBase = createWalletClient({
+    account: agentAccount,
+    chain: baseSepolia,
+    transport: http(baseSepoliaRpcUrl),
+  });
 
-  if (funderPk && config.agentOnboardingEthWei > 0n) {
+  if (funderPk) {
     const funderAccount = privateKeyToAccount(funderPk);
     const funderWallet = createWalletClient({
       account: funderAccount,
@@ -131,53 +136,55 @@ export async function executeAgentOnboarding(
     const funderWalletBase = createWalletClient({
       account: funderAccount,
       chain: baseSepolia,
-      transport: http(contracts.baseSepoliaRpcUrl),
+      transport: http(baseSepoliaRpcUrl),
     });
-    const hash = await funderWalletBase.sendTransaction({
-      to: agentAddress as Hex,
-      value: config.agentOnboardingEthWei,
-    });
-    // await client.waitForTransactionReceipt({ hash });
-    result.ethTransfer = { hash };
-    log?.info({ hash }, "agentOnboarding: ETH tx confirmed");
 
-    log?.info(
-      { to: agentAddress, wei: config.agentOnboardingEthWei.toString() },
-      "agentOnboarding: sending ETH to agent"
-    );
     try {
-      const hash = await funderWallet.sendTransaction({
-        to: agentAddress as Hex,
-        value: config.agentOnboardingEthWei,
-      });
+      if (config.agentOnboardingEthWei > 0n) {
+        const hashSepolia = await funderWallet.sendTransaction({
+          to: agentAddress as Hex,
+          value: config.agentOnboardingEthWei,
+        });
+        await client.waitForTransactionReceipt({ hash: hashSepolia });
+        result.ethTransfer = { hash: hashSepolia };
+        log?.info({ hashSepolia }, "agentOnboarding: Sepolia ETH sent to agent");
+      }
 
-      const hash2 = await funderWallet.writeContract({
-        address: BASE_USDC_ADDRESS as Hex,
-        abi: BASE_ERC20,
-        functionName: "transfer",
-        args: [agentAddress as Hex, 2000000n],
-      });
-      // await client.waitForTransactionReceipt({ hash2 });
-      log?.info({ hash }, "agentOnboarding: ETH tx sent, waiting for receipt");
-      await client.waitForTransactionReceipt({ hash });
-      result.ethTransfer = { hash };
-      log?.info({ hash }, "agentOnboarding: ETH tx confirmed");
+      if (config.agentOnboardingEthWeiBaseSepolia > 0n) {
+        const hashBaseEth = await funderWalletBase.sendTransaction({
+          to: agentAddress as Hex,
+          value: config.agentOnboardingEthWeiBaseSepolia,
+        });
+        await client.waitForTransactionReceipt({ hash: hashBaseEth });
+        log?.info({ hashBaseEth }, "agentOnboarding: Base Sepolia ETH sent to agent");
+      }
+
+      if (config.agentOnboardingUsdcAmount > 0n) {
+        const hashBaseUsdc = await funderWalletBase.writeContract({
+          address: BASE_USDC_ADDRESS as Hex,
+          abi: BASE_ERC20,
+          functionName: "transfer",
+          args: [agentAddress as Hex, config.agentOnboardingUsdcAmount],
+        });
+        await client.waitForTransactionReceipt({ hash: hashBaseUsdc });
+        log?.info({ hashBaseUsdc }, "agentOnboarding: Base Sepolia USDC sent to agent");
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log?.warn({ error: msg }, "agentOnboarding: ETH transfer failed");
+      log?.warn({ error: msg }, "agentOnboarding: funding failed");
       result.ethTransfer = { error: msg };
+      return result;
     }
   }
 
   log?.info("agentOnboarding: USDC approve");
   try {
-    const hash = await agentWallet.writeContract({
+    const hash = await agentWalletBase.writeContract({
       address: USDC_ADDRESS as Hex,
       abi: ERC20_APPROVE_ABI,
       functionName: "approve",
       args: [PREDICTION_VAULT_ADDRESS as Hex, MAX_U256],
     });
-
     await client.waitForTransactionReceipt({ hash });
     result.erc20Approve = { hash };
     log?.info({ hash }, "agentOnboarding: USDC approve confirmed");
@@ -189,7 +196,7 @@ export async function executeAgentOnboarding(
 
   log?.info("agentOnboarding: CT setApprovalForAll");
   try {
-    const hash = await agentWallet.writeContract({
+    const hash = await agentWalletBase.writeContract({
       address: CT_ADDRESS as Hex,
       abi: ERC1155_SET_APPROVAL_FOR_ALL_ABI,
       functionName: "setApprovalForAll",

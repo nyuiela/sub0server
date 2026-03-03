@@ -48,15 +48,17 @@ const CT_ABI = [
 ] as const;
 
 let publicClient: ReturnType<typeof createPublicClient> | null = null;
+let cachedRpcUrl: string | null = null;
 
 function getClient(): ReturnType<typeof createPublicClient> | null {
-  const rpcUrl = config.chainRpcUrl?.trim();
+  const rpcUrl = config.chainRpcUrl ?? null;
   if (!rpcUrl) return null;
-  if (publicClient === null) {
+  if (publicClient === null || cachedRpcUrl !== rpcUrl) {
     publicClient = createPublicClient({
       chain: sepolia,
       transport: http(rpcUrl),
     });
+    cachedRpcUrl = rpcUrl;
   }
   return publicClient;
 }

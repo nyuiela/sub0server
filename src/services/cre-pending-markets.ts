@@ -73,15 +73,17 @@ const SUB0_GET_MARKET_ABI = [
 ] as const;
 
 let publicClient: ReturnType<typeof createPublicClient> | null = null;
+let cachedRpcUrl: string | null = null;
 
 function getClient(): ReturnType<typeof createPublicClient> | null {
-  const rpcUrl = config.chainRpcUrl;
+  const rpcUrl = config.chainRpcUrl ?? null;
   if (!rpcUrl) return null;
-  if (publicClient === null) {
+  if (publicClient === null || cachedRpcUrl !== rpcUrl) {
     publicClient = createPublicClient({
       chain: sepolia,
       transport: http(rpcUrl),
     });
+    cachedRpcUrl = rpcUrl;
   }
   return publicClient;
 }
@@ -184,7 +186,7 @@ async function persistMarketFromChain(
   if (item.marketId) {
     const draft = await prisma.market.findUnique({
       where: { id: item.marketId },
-      select: { id: true, questionId: true, conditionId: true, collateralToken: true },
+      select: { id: true, questionId: true, conditionId: true, collateralToken: true, liquiditySeeded: true },
     });
     const needsChainData = draft && (draft.questionId == null || draft.conditionId == null);
     if (needsChainData && draft) {
@@ -211,12 +213,15 @@ async function persistMarketFromChain(
           outcomePositionIds
         );
         const amountUsdcRaw = config.platformSeedAmountUsdcRaw;
-        const seeded = await seedMarketLiquidityOnChain(item.questionId, amountUsdcRaw);
+        let seeded = false;
+        if (!draft?.liquiditySeeded) {
+          seeded = await seedMarketLiquidityOnChain(item.questionId, amountUsdcRaw);
+        }
         const initialVolume = seeded ? rawUsdcToDecimalString(amountUsdcRaw) : "0";
         const initialLiquidity = initialVolume;
         await prisma.market.update({
           where: { id: item.marketId },
-          data: { volume: initialVolume, liquidity: initialLiquidity },
+          data: { volume: initialVolume, liquidity: initialLiquidity, liquiditySeeded: seeded },
         });
         await broadcastMarketUpdate({
           marketId: item.marketId,
@@ -282,7 +287,10 @@ async function persistMarketFromChain(
   );
 
   const amountUsdcRaw = config.platformSeedAmountUsdcRaw;
-  const seeded = await seedMarketLiquidityOnChain(item.questionId, amountUsdcRaw);
+  let seeded = false;
+  if (!market.liquiditySeeded) {
+    seeded = await seedMarketLiquidityOnChain(item.questionId, amountUsdcRaw);
+  }
   const initialVolume = seeded ? rawUsdcToDecimalString(amountUsdcRaw) : "0";
   const initialLiquidity = initialVolume;
 
@@ -291,6 +299,7 @@ async function persistMarketFromChain(
     data: {
       volume: initialVolume,
       liquidity: initialLiquidity,
+      liquiditySeeded: seeded,
     },
   });
 

@@ -1,4 +1,4 @@
-import contracts from "../lib/contracts.json" with { type: "json" };
+import contracts from "../lib/contracts.json" assert { type: "json" };
 const requiredEnv = (key: string): string => {
   const value = process.env[key];
   if (value === undefined || value === "") {
@@ -299,7 +299,7 @@ function makeConfig() {
     },
     /** If true (default), cron generates markets (agents * agentMarketsPerJob) and sends them in the request body so CRE batches all on-chain in one run with one batch callback. If false, CRE fetches via GET (cap 4 per run). */
     get creMarketCronBatchPayload(): boolean {
-      return process.env.CRE_MARKET_CRON_BATCH_PAYLOAD !== "false" && process.env.CRE_MARKET_CRON_BATCH_PAYLOAD !== "0";
+      return process.env.CRE_MARKET_CRON_BATCH_PAYLOAD === "true" || process.env.CRE_MARKET_CRON_BATCH_PAYLOAD === "1";
     },
     /** Backend base URL for worker to call POST /api/orders. Default: same host as this server (port from PORT). Backend typically runs on 4000. */
     get backendUrl(): string {
@@ -311,7 +311,7 @@ function makeConfig() {
     },
     /** If true, trigger-all runs discovery: fetch OPEN markets and enqueue new ones per agent (main only). Default true. */
     get agentDiscoveryEnabled(): boolean {
-      return process.env.AGENT_DISCOVERY_ENABLED !== "false" && process.env.AGENT_DISCOVERY_ENABLED !== "0";
+      return process.env.AGENT_DISCOVERY_ENABLED === "true" || process.env.AGENT_DISCOVERY_ENABLED === "1";
     },
     /** Max new markets to enqueue per agent per discovery run (main). Default 10. */
     get agentDiscoveryMaxNewPerAgentPerRun(): number {
@@ -328,6 +328,16 @@ function makeConfig() {
     /** Interval in ms for in-process trigger-all cron. Default 300000 (5 min). Only when TRIGGER_ALL_CRON_ENABLED=true. */
     get triggerAllCronIntervalMs(): number {
       return Math.max(60_000, Number(process.env.TRIGGER_ALL_CRON_INTERVAL_MS) || 300_000);
+    },
+    get agentOnboardingEthWeiBaseSepolia(): bigint {
+      const raw = process.env.AGENT_ONBOARDING_ETH_WEI_BASE_SEPOLIA?.trim();
+      if (raw) return BigInt(raw);
+      return BigInt("30000000000000000"); // default 0.03 ETH
+    },
+    get agentOnboardingUsdcAmount(): bigint {
+      const raw = process.env.AGENT_ONBOARDING_USDC_AMOUNT?.trim();
+      if (raw) return BigInt(raw);
+      return 2000000n; // default USDC
     },
   };
 }

@@ -16,6 +16,7 @@ import {
 import { getX402Config } from "../x402/config.js";
 import { computeSimulatePriceUsdc, usdcToAtomic } from "../x402/pricing.js";
 import { paySimulateWithAgent } from "../services/agent-x402-pay.service.js";
+import { MarketStatus } from "@prisma/client";
 
 const USDC_DECIMALS = 6;
 
@@ -108,7 +109,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       if (!user?.userId) {
         return reply.code(401).send({ error: "Authentication required" });
       }
-      const id = req.params.id?.trim();
+      const id = req.params.id?.trim() ?? "";
       if (!id) return reply.code(400).send({ error: "Simulation id required" });
       const prisma = getPrismaClient();
       const sim = await prisma.simulation.findFirst({
@@ -166,7 +167,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       if (!user?.userId) {
         return reply.code(401).send({ error: "Authentication required" });
       }
-      const agentId = req.query.agentId?.trim();
+      const agentId = req.query.agentId?.trim() ?? "";
       if (!agentId) {
         return reply.code(400).send({ error: "agentId is required" });
       }
@@ -405,7 +406,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       const maxMarketsNum =
         typeof rawMax === "number" && Number.isFinite(rawMax)
           ? rawMax
-          : typeof rawMax === "string" && rawMax.trim() !== ""
+          : typeof rawMax === "string"
             ? Number(rawMax)
             : NaN;
       const maxMarketsForCap =
@@ -415,7 +416,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       const durationNum =
         typeof rawDuration === "number" && Number.isFinite(rawDuration)
           ? rawDuration
-          : typeof rawDuration === "string" && rawDuration.trim() !== ""
+          : typeof rawDuration === "string"
             ? Number(rawDuration)
             : NaN;
       const durationMinutes =
@@ -431,7 +432,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
           return reply.code(400).send({ error: payResult.error });
         }
       }
-      const marketsInRange = await prisma.market.findMany({
+      const marketsInRange: { id: string; status: MarketStatus; agentReasons?: { tradeReason: string }[] }[] = await prisma.market.findMany({
         where: {
           questionId: { not: null },
           OR: [
@@ -446,7 +447,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         },
         orderBy: { resolutionDate: "desc" },
         take: maxMarketsForCap,
-        select: { id: true },
+        select: { id: true, status: true, agentReasons: { select: { agentId: true, tradeReason: true } } },
       });
 
       const simulation = await prisma.simulation.create({
@@ -461,20 +462,21 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       });
 
       const jobIds: string[] = [];
-      for (const m of marketsInRange) {
+      for (const market of marketsInRange) {
         await prisma.agentEnqueuedMarket.create({
           data: {
             agentId,
-            marketId: m.id,
+            marketId: market.id,
             simulationId: simulation.id,
             chainKey: CHAIN_KEY_TENDERLY,
             simulateDateRangeStart: rangeStart,
             simulateDateRangeEnd: rangeEnd,
+            tradeReason: market.tradeReason ?? undefined,
           },
         });
         const jobId = await enqueueAgentPredictionNow({
           agentId,
-          marketId: m.id,
+          marketId: market.id,
           simulationId: simulation.id,
           chainKey: CHAIN_KEY_TENDERLY,
         });
@@ -504,7 +506,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       if (!simulationId) {
         return reply.code(400).send({ error: "simulationId is required" });
       }
-      const cancelled = req.body?.cancelled === true || req.body?.cancelled === "true";
+      const cancelled = Boolean(req.body?.cancelled);
       const prisma = getPrismaClient();
       const sim = await prisma.simulation.findFirst({
         where: { id: simulationId, ownerId: user.userId },

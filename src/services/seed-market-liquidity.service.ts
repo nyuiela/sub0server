@@ -14,7 +14,7 @@ const contractsData = require("../lib/contracts.json") as { contracts?: { predic
 
 const PREDICTION_VAULT_ADDRESS =
   contractsData.contracts?.predictionVault;
-import predictionVaultAbi from "../lib/contract/predictionVault.json" with { type: "json" };
+import predictionVaultAbi from "../lib/contract/predictionVault.json" assert { type: "json" };
 
 let walletClient: ReturnType<typeof createWalletClient> | null = null;
 let publicClient: ReturnType<typeof createPublicClient> | null = null;

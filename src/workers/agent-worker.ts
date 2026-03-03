@@ -20,6 +20,7 @@ interface AgentJobPayload {
   marketId: string;
   agentId: string;
   chainKey?: AgentChainKey;
+  simulationId?: string;
 }
 
 async function submitOrderFromWorker(payload: {
@@ -95,7 +96,8 @@ async function createPendingTrade(
   outcomeIndex: number,
   side: "BID" | "ASK",
   quantity: string,
-  pendingReason: "NO_WALLET" | "INSUFFICIENT_BALANCE" | "INSUFFICIENT_POSITION"
+  pendingReason: "NO_WALLET" | "INSUFFICIENT_BALANCE" | "INSUFFICIENT_POSITION",
+  reason?: string
 ): Promise<void> {
   const prisma = getPrismaClient();
   await prisma.pendingAgentTrade.create({
@@ -107,19 +109,14 @@ async function createPendingTrade(
       quantity: new Decimal(quantity),
       status: "PENDING",
       pendingReason,
+      tradeReason: reason?.slice(0, 2000) ?? "no reason provided",
     },
   });
   console.log(`Pending trade created: ${pendingReason} (${side} qty=${quantity})`);
 }
 
-/**
- * Chain logic:
- * - chainKey "main" = live trading: balance from Agent.balance / AgentChainBalance(main), no date-range context. After a trade we sync balance from main chain.
- * - chainKey "tenderly" = simulation: balance from AgentChainBalance(tenderly) (funded by /api/simulate/fund), simulateDateRange for as-of context. After a trade we sync balance from Tenderly so the simulate tab shows the updated balance.
- * Order submission (POST /api/orders) and CRE execution do not receive chainKey; CRE is expected to use Tenderly when running in simulate mode (e.g. same CRE_HTTP_URL with workflow configured for Tenderly RPC).
- */
 async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
-  const { marketId, agentId, simulationId, chainKey = CHAIN_KEY_MAIN } = job.data;
+  const { marketId, agentId, simulationId = null, chainKey = CHAIN_KEY_MAIN } = job.data;
   console.log(`Agent job: marketId=${marketId} agentId=${agentId} simulationId=${simulationId ?? "(main)"}`);
 
   if (!config.agentTradingEnabled) {
@@ -260,7 +257,7 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     agent.encryptedPrivateKey
   );
   if (!hasWallet) {
-    await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "NO_WALLET");
+    await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "NO_WALLET", decision.reason);
     return;
   }
 
@@ -270,14 +267,14 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
       .filter((p) => p.outcomeIndex === outcomeIndex && p.side === "LONG")
       .reduce((sum, p) => sum.plus(p.collateralLocked.toString()), new Decimal(0));
     if (longForOutcome.lt(qty)) {
-      await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_POSITION");
+      await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_POSITION", decision.reason);
       return;
     }
   } else {
     const balanceStr = await getAgentBalanceForChain(agentId, chainKey);
     const balance = new Decimal(balanceStr ?? "0");
     if (balance.lt(qty)) {
-      await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_BALANCE");
+      await createPendingTrade(agentId, marketId, outcomeIndex, side, quantity, "INSUFFICIENT_BALANCE", decision.reason);
       return;
     }
   }
@@ -297,11 +294,22 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     const nextRun = new Date(Date.now() + followUpMs);
     await prisma.agentEnqueuedMarket.updateMany({
       where: { agentId, marketId, simulationId: simulationId ?? null },
-      data: { status: "TRADED", nextRunAt: nextRun },
+      data: {
+        status: "TRADED",
+        nextRunAt: nextRun,
+        tradeReason: decision.reason?.slice(0, 2000) ?? "no reason provided",
+      },
     });
     void syncAgentBalanceFromBackend(agentId, chainKey);
   } else {
     console.error(`Order failed: status=${result.status} body=${JSON.stringify(result.body)}`);
+    await prisma.agentEnqueuedMarket.updateMany({
+      where: { agentId, marketId, simulationId: simulationId ?? null },
+      data: {
+        tradeReason: decision.reason?.slice(0, 2000) ?? "no reason provided",
+        discardReason: `Order failed (${result.status}): ${JSON.stringify(result.body)}`.slice(0, 2000),
+      },
+    });
   }
 }
 
