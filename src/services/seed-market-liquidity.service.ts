@@ -121,6 +121,7 @@ export async function seedMarketLiquidityOnChain(
       nonce: currentNonce,
       maxFeePerGas: bumpedMaxFeePerGas,
       maxPriorityFeePerGas: bumpedMaxPriorityFeePerGas,
+      gas: 500000n, // 500k gas limit for seeding transactions
     });
     
     // Add timeout for transaction confirmation
@@ -180,6 +181,7 @@ export async function seedMarketLiquidityOnChain(
           nonce: currentNonce,
           maxFeePerGas: retryMaxFeePerGas,
           maxPriorityFeePerGas: retryMaxPriorityFeePerGas,
+          gas: 500000n, // 500k gas limit for seeding transactions
         });
         
         const receipt = await Promise.race([
