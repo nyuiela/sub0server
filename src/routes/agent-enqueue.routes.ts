@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { enqueueAgentPrediction, enqueueAgentPredictionNow } from "../workers/queue.js";
 import { getPrismaClient } from "../lib/prisma.js";
-import { requireAgentOwnerOrApiKeyById, requireUserOrApiKey, requireApiKeyOnly } from "../lib/permissions.js";
+import { requireAgentOwnerOrApiKeyById, requireUserOrApiKey, requireApiKeyOnly, requireCurrentUser } from "../lib/permissions.js";
 import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 import { isAgentChainKey } from "../types/agent-chain.js";
 import { runTriggerAll } from "../services/trigger-all.service.js";
@@ -32,12 +32,12 @@ export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<
       : (rawChainKey != null && isAgentChainKey(rawChainKey) ? rawChainKey : CHAIN_KEY_MAIN);
 
     if (isSimulate) {
-      const user = requireUser(req);
-      if (!user?.userId) {
+      const user = await requireCurrentUser(req, reply);
+      if (!user?.id) {
         return reply.code(401).send({ error: "Authentication required to add to simulate" });
       }
       const sim = await prisma.simulation.findFirst({
-        where: { id: bodySimulationId!, ownerId: user.userId },
+        where: { id: bodySimulationId!, ownerId: user.id },
         select: { id: true },
       });
       if (!sim) {
@@ -68,7 +68,7 @@ export async function registerAgentEnqueueRoutes(app: FastifyInstance): Promise<
       });
     } else {
       await prisma.agentEnqueuedMarket.create({
-        data: { agentId, marketId, simulationId, chainKey },
+        data: { agentId, marketId, simulationId, chainKey, tradeReason: "" },
       });
     }
     return reply.send({ jobId });
