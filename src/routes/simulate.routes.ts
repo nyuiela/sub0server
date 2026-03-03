@@ -206,8 +206,8 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         ]);
         const usdcDecimal = new Decimal(usdcUnits.toString()).div(
           Math.pow(10, USDC_DECIMALS)
-        ).toFixed();
-        await upsertAgentChainBalance(agentId, CHAIN_KEY_TENDERLY, usdcDecimal);
+        ).toString();
+        await upsertAgentChainBalance(agentId, CHAIN_KEY_TENDERLY, usdcUnits.toString());
         return reply.send({
           nativeWei: nativeWei.toString(),
           usdcUnits: usdcUnits.toString(),
@@ -448,7 +448,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         },
         orderBy: { resolutionDate: "desc" },
         take: maxMarketsForCap,
-        select: { id: true, status: true,},
+        select: { id: true, status: true, },
       });
 
       const simulation = await prisma.simulation.create({

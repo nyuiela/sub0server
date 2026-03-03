@@ -48,7 +48,7 @@ export function calculateCost(q: OutcomeQuantities, b: string): string {
   if (n === 0) throw new Error("LMSR: q must have at least one outcome");
   const x: D[] = q.map((qi) => toD(qi).div(bD));
   const lse = logSumExp(x);
-  return bD.times(lse).toFixed(DECIMAL_PLACES);
+  return bD.times(lse).toString();
 }
 
 /**
@@ -64,7 +64,7 @@ export function getInstantPrice(q: OutcomeQuantities, b: string, targetOutcome: 
   const expShifted = x.map((xi) => expSafe(xi.minus(xMax)));
   const sum = expShifted.reduce((a, b) => a.plus(b), toD(0));
   const p = expShifted[targetOutcome].div(sum);
-  return p.toFixed(DECIMAL_PLACES);
+  return p.toString();
 }
 
 /**
@@ -74,7 +74,7 @@ export function calculateTradeCost(qBefore: OutcomeQuantities, qAfter: OutcomeQu
   if (qBefore.length !== qAfter.length) throw new Error("LMSR: q length mismatch");
   const cBefore = toD(calculateCost(qBefore, b));
   const cAfter = toD(calculateCost(qAfter, b));
-  return cAfter.minus(cBefore).toFixed(DECIMAL_PLACES);
+  return cAfter.minus(cBefore).toString();
 }
 
 /**
@@ -82,7 +82,7 @@ export function calculateTradeCost(qBefore: OutcomeQuantities, qAfter: OutcomeQu
  */
 export function applyTradeVector(q: OutcomeQuantities, tradeVector: TradeVector): OutcomeQuantities {
   if (q.length !== tradeVector.length) throw new Error("LMSR: length mismatch");
-  return q.map((qi, i) => toD(qi).plus(toD(tradeVector[i])).toFixed(DECIMAL_PLACES));
+  return q.map((qi, i) => toD(qi).plus(toD(tradeVector[i])).toString());
 }
 
 /**
@@ -104,7 +104,7 @@ export function worstCaseLoss(b: string, numOutcomes: number): string {
   const bD = toD(b);
   const n = toD(numOutcomes);
   if (n.lte(0)) throw new Error("LMSR: numOutcomes must be positive");
-  return bD.times(n.ln()).toFixed(DECIMAL_PLACES);
+  return bD.times(n.ln()).toString();
 }
 
 /**
@@ -141,7 +141,7 @@ export function getQuoteForSell(
   outcomeIndex: number,
   quantity: string
 ): { instantPrice: string; tradeCost: string; qAfter: OutcomeQuantities } {
-  const negQty = toD(quantity).negated().toFixed(DECIMAL_PLACES);
+  const negQty = toD(quantity).negated().toString();
   const tradeVector: TradeVector = q.map((_, i) => (i === outcomeIndex ? negQty : "0"));
   const qAfter = applyTradeVector(q, tradeVector);
   if (toD(qAfter[outcomeIndex]).lt(0)) throw new Error("LMSR: cannot sell more than outstanding");

@@ -26,7 +26,9 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
     if (type === "LIMIT" && (raw.price === undefined || raw.price === null || raw.price === "")) {
       return reply.code(400).send({ error: "price is required for LIMIT orders" });
     }
-    const price = type === "LIMIT" ? raw.price : "0";
+    console.log("raw.price", raw.price);
+    // tbd 
+    const price = raw.price;
 
     const prisma = getPrismaClient();
     const market = await prisma.market.findUnique({
@@ -108,7 +110,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           outcomeIndex: raw.outcomeIndex,
           side: raw.side,
           type: "MARKET",
-          price: "0",
+          price: price!.toString(),
           quantity: crePayload.quantity,
           remainingQty: "0",
           status: "FILLED",
@@ -122,7 +124,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           id: tradeId,
           marketId: raw.marketId,
           outcomeIndex: raw.outcomeIndex,
-          price: crePayload.tradeCostUsdc,
+          price: price!.toString(),
           quantity: crePayload.quantity,
           makerOrderId: "contract",
           takerOrderId: orderId,

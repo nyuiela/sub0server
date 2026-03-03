@@ -61,7 +61,7 @@ function buildReasoning(
   if (Math.abs(momentum) > 0.001) {
     parts.push(momentum > 0 ? "positive momentum" : "negative momentum");
   }
-  parts.push(`probability ${probability.toFixed(2)}`);
+  parts.push(`probability ${probability}`);
   return parts.length > 0 ? parts.join("; ") : "neutral";
 }
 

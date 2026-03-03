@@ -16,7 +16,7 @@ const DEC = 18;
 function sumPrices(prices: string[]): string {
   return prices.reduce((a, b) => {
     const x = parseFloat(a) + parseFloat(b);
-    return x.toFixed(DEC);
+    return x.toString();
   }, "0");
 }
 

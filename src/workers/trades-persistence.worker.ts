@@ -140,8 +140,8 @@ async function applyTradesToPositions(
         await prisma.position.update({
           where: { id: existing.id },
           data: {
-            avgPrice: newAvg.toFixed(18),
-            collateralLocked: newLocked.toFixed(18),
+            avgPrice: newAvg,
+            collateralLocked: newLocked,
             updatedAt: new Date(),
           },
         });
@@ -157,8 +157,8 @@ async function applyTradesToPositions(
             contractPositionId,
             side: "LONG",
             status: "OPEN",
-            avgPrice: newAvg.toFixed(18),
-            collateralLocked: newLocked.toFixed(18),
+            avgPrice: newAvg,
+            collateralLocked: newLocked,
             isAmm: false,
             chainKey: positionChainKey,
           },
@@ -201,8 +201,8 @@ async function applyTradesToPositions(
                 contractPositionId,
                 side: "SHORT",
                 status: "OPEN",
-                avgPrice: price.toFixed(18),
-                collateralLocked: after.abs().toFixed(18),
+                avgPrice: price,
+                collateralLocked: after.abs(),
                 isAmm: false,
                 chainKey: positionChainKey,
               },
@@ -212,7 +212,7 @@ async function applyTradesToPositions(
           await prisma.position.update({
             where: { id: longPos.id },
             data: {
-              collateralLocked: after.toFixed(18),
+              collateralLocked: after,
               updatedAt: new Date(),
             },
           });
@@ -229,8 +229,8 @@ async function applyTradesToPositions(
             contractPositionId,
             side: "SHORT",
             status: "OPEN",
-            avgPrice: price.toFixed(18),
-            collateralLocked: qty.toFixed(18),
+            avgPrice: price,
+            collateralLocked: qty,
             isAmm: false,
             chainKey: positionChainKey,
           },
@@ -251,7 +251,7 @@ function volumeDeltaByMarket(trades: ExecutedTrade[]): Map<string, number> {
 
 /** USDC 6 decimals; tradeCostUsdc for a fill = quantity * price. */
 function tradeCostUsdcForFill(quantity: string, price: string): string {
-  return new Decimal(quantity).times(price).toDecimalPlaces(6).toFixed();
+  return new Decimal(quantity).times(price).toString();
 }
 
 /**
@@ -400,7 +400,9 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
 
   await executeCreTrades(prisma, order, trades);
 
+  console.log("trades", trades);
   const volumeDeltas = volumeDeltaByMarket(trades);
+  console.log("volumeDeltas", volumeDeltas);
   const marketIds = [...volumeDeltas.keys()];
   for (const marketId of marketIds) {
     const delta = volumeDeltas.get(marketId) ?? 0;

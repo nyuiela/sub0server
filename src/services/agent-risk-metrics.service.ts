@@ -45,7 +45,7 @@ export async function calculateAgentRiskMetrics(
   await prisma.agent.update({
     where: { id: agentId },
     data: {
-      maxDrawdown: maxDrawdown.toFixed(18),
+      maxDrawdown: maxDrawdown.toString(),
       winRate,
     },
   });

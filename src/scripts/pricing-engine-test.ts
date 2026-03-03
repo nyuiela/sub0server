@@ -56,7 +56,7 @@ function main(): void {
 
   for (const r of rows) {
     console.log(
-      `${String(r.markets).padEnd(wM)}  ${String(r.minutes).padEnd(wMin)}  ${r.usdc.toFixed(2).padEnd(wU)}  ${r.atomic}`
+      `${String(r.markets).padEnd(wM)}  ${String(r.minutes).padEnd(wMin)}  ${r.usdc.toString().padEnd(wU)}  ${r.atomic}`
     );
   }
 

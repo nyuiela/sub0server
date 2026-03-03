@@ -162,8 +162,8 @@ export class OrderBook {
     const makerRem = new DecimalCtor(maker.remainingQty);
     const fillQty = takerRem.lte(makerRem) ? takerRem : makerRem;
 
-    maker.remainingQty = makerRem.minus(fillQty).toFixed(DECIMAL_PLACES);
-    taker.remainingQty = takerRem.minus(fillQty).toFixed(DECIMAL_PLACES);
+    maker.remainingQty = makerRem.minus(fillQty).toString();
+    taker.remainingQty = takerRem.minus(fillQty).toString();
 
     if (new DecimalCtor(maker.remainingQty).lte(0)) {
       maker.status = "FILLED";
@@ -177,8 +177,8 @@ export class OrderBook {
       id: tradeId,
       marketId: this.marketId,
       outcomeIndex: this.outcomeIndex,
-      price: new DecimalCtor(makerPriceStr).toFixed(DECIMAL_PLACES),
-      quantity: fillQty.toFixed(DECIMAL_PLACES),
+      price: new DecimalCtor(makerPriceStr).toString(),
+      quantity: fillQty.toString(),
       makerOrderId: maker.id,
       takerOrderId: taker.id,
       side: taker.side,
@@ -206,7 +206,7 @@ export class OrderBook {
         side: input.side,
         type: input.type,
         price: "0",
-        quantity: quantity.toFixed(DECIMAL_PLACES),
+        quantity: quantity.toString(),
         remainingQty: "0",
         status: "REJECTED",
         createdAt: Date.now(),
@@ -231,7 +231,7 @@ export class OrderBook {
         side: input.side,
         type: input.type,
         price: "0",
-        quantity: quantity.toFixed(DECIMAL_PLACES),
+        quantity: quantity.toString(),
         remainingQty: "0",
         status: "REJECTED",
         createdAt: Date.now(),
@@ -244,7 +244,7 @@ export class OrderBook {
     }
 
     const now = Date.now();
-    const priceStr = priceVal.toFixed(DECIMAL_PLACES);
+    const priceStr = priceVal.toString();
     const order: EngineOrder = {
       id: input.id,
       marketId: input.marketId,
@@ -252,8 +252,8 @@ export class OrderBook {
       side: input.side,
       type: input.type,
       price: priceStr,
-      quantity: quantity.toFixed(DECIMAL_PLACES),
-      remainingQty: quantity.toFixed(DECIMAL_PLACES),
+      quantity: quantity.toString(),
+      remainingQty: quantity.toString(),
       status: "PENDING",
       createdAt: now,
       userId: input.userId,
@@ -265,7 +265,7 @@ export class OrderBook {
     const trades: ExecutedTrade[] = [];
 
     // Match: for LIMIT, BID crosses when ask <= order price; ASK when bid >= order price. MARKET/IOC cross any.
-    for (;;) {
+    for (; ;) {
       const best = this.getBestOpposite(order.side);
       if (best === null) break;
       if (order.type === "LIMIT") {
@@ -300,14 +300,14 @@ export class OrderBook {
       const list = this.bids.get(p);
       if (!list || list.length === 0) continue;
       const total = list.reduce((acc, o) => acc.plus(o.remainingQty), new DecimalCtor(0));
-      bids.push({ price: p, quantity: total.toFixed(DECIMAL_PLACES), orderCount: list.length });
+      bids.push({ price: p, quantity: total.toString(), orderCount: list.length });
     }
     const asks: OrderBookLevel[] = [];
     for (const p of this.askPrices) {
       const list = this.asks.get(p);
       if (!list || list.length === 0) continue;
       const total = list.reduce((acc, o) => acc.plus(o.remainingQty), new DecimalCtor(0));
-      asks.push({ price: p, quantity: total.toFixed(DECIMAL_PLACES), orderCount: list.length });
+      asks.push({ price: p, quantity: total.toString(), orderCount: list.length });
     }
     return {
       marketId: this.marketId,

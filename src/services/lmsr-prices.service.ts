@@ -93,7 +93,7 @@ export async function getLmsrStateForMarket(marketId: string): Promise<LmsrMarke
       qNum[p.outcomeIndex] = qNum[p.outcomeIndex].minus(amt);
     }
   }
-  const q: OutcomeQuantities = qNum.map((d) => d.toFixed(18));
+  const q: OutcomeQuantities = qNum.map((d) => d.toString());
 
   const b =
     market.liquidity != null && String(market.liquidity).trim() !== ""

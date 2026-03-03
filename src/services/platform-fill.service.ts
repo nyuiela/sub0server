@@ -55,7 +55,7 @@ export async function fillMarketFromPlatform(
   const available = new Decimal(platformPosition.collateralLocked.toString());
   if (available.lte(0)) return { additionalTrades: [], updatedOrder: order };
 
-  const fillableQty = Decimal.min(remaining, available).toFixed(DECIMAL_PLACES);
+  const fillableQty = Decimal.min(remaining, available).toString();
   const price =
     priceHint ?? (existingTrades.length > 0 ? existingTrades[existingTrades.length - 1].price : "0.5");
   const executedAt = Date.now();
@@ -78,7 +78,7 @@ export async function fillMarketFromPlatform(
     executedAt,
   };
 
-  const newRemaining = remaining.minus(fillableQty).toFixed(DECIMAL_PLACES);
+  const newRemaining = remaining.minus(fillableQty).toString();
   const updatedOrder: EngineOrder = {
     ...order,
     remainingQty: newRemaining,

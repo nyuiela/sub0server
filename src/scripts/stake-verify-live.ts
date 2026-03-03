@@ -254,7 +254,7 @@ async function main(): Promise<void> {
   dbChecks.push({
     name: "Trade volume sum matches market",
     pass: Math.abs(tradeVolumeSum - vol) < 0.01,
-    detail: `trades sum=${tradeVolumeSum.toFixed(4)} market vol=${vol}`,
+    detail: `trades sum=${tradeVolumeSum} market vol=${vol}`,
   });
 
   const [waiting, active] = await Promise.all([queue.getWaitingCount(), queue.getActiveCount()]);

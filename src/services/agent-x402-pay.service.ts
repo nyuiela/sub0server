@@ -106,7 +106,7 @@ export async function paySimulateWithAgent(
     const need = Number(amount) / 1e6;
     return {
       ok: false,
-      error: `Insufficient USDC on payment chain. The agent needs at least ${need.toFixed(2)} USDC. Fund the agent wallet to run simulations.`,
+      error: `Insufficient USDC on payment chain. The agent needs at least ${need} USDC. Fund the agent wallet to run simulations.`,
       code: "INSUFFICIENT_BALANCE",
     };
   }

@@ -16,7 +16,7 @@ const INPUT_COST_PER_1M = 5.0;
 const OUTPUT_COST_PER_1M = 15.0;
 
 function toDecimal(v: string | number): string {
-  return new Decimal(v).toFixed(18);
+  return new Decimal(v).toString();
 }
 
 async function seedKaleelUser(): Promise<{ id: string; address: string }> {
@@ -258,12 +258,12 @@ async function seedAgentHistory(
     where: { id: agentId },
     data: {
       balance: toDecimal(balance),
-      tradedAmount: totalVolume.toFixed(18),
+      tradedAmount: totalVolume.toString(),
       totalTrades: totalTradesCount,
       totalLlmTokens,
-      totalLlmCost: totalLlmCost.toFixed(18),
+      totalLlmCost: totalLlmCost.toString(),
       currentExposure: toDecimal(currentExposure),
-      maxDrawdown: maxDrawdown.toFixed(18),
+      maxDrawdown: maxDrawdown.toString(),
       pnl: toDecimal(pnl[daysBack] ?? 0),
     } as Parameters<typeof prisma.agent.update>[0]["data"],
   });
