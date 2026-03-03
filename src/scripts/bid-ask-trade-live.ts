@@ -133,6 +133,7 @@ async function placeOrder(params: {
     side: params.side,
     type: params.type,
     quantity: params.quantity,
+
   };
   if (params.type === "LIMIT" && params.price != null) body.price = params.price;
   return fetchApi("/api/orders", { method: "POST", body });
@@ -159,7 +160,7 @@ async function runMarket(marketId: string): Promise<boolean> {
     side: "BID",
     type: "LIMIT",
     price: "0.4",
-    quantity: "50",
+    quantity: "50000000",
   });
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
   if (bidRes.status !== 201) {
@@ -176,7 +177,7 @@ async function runMarket(marketId: string): Promise<boolean> {
     side: "ASK",
     type: "LIMIT",
     price: "0.5",
-    quantity: "30",
+    quantity: "30000000",
   });
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
   if (askRes.status !== 201) {
@@ -194,7 +195,7 @@ async function runMarket(marketId: string): Promise<boolean> {
     side: "BID",
     type: "LIMIT",
     price: "0.5",
-    quantity: "20",
+    quantity: "20000000",
   });
   if (crossRes.status !== 201) {
     log(`Cross BID failed ${crossRes.status}: ${JSON.stringify(crossRes.data)}`, "fail");

@@ -99,7 +99,7 @@ async function fetchApi(
 // CRE Direct functions (NEW)
 async function callCre(action: string, payload: Record<string, unknown>): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   if (!CRE_HTTP_URL) return { ok: false, error: "CRE_HTTP_URL not set" };
-  
+
   const body: Record<string, unknown> = { action, ...payload };
   if (CRE_HTTP_API_KEY) (body as any).apiKey = CRE_HTTP_API_KEY;
 
@@ -127,13 +127,13 @@ async function callCre(action: string, payload: Record<string, unknown>): Promis
 // Get nonce for account
 async function getNonce(address: string): Promise<number> {
   if (!CRE_PRIVATE_KEY) throw new Error("CRE_PRIVATE_KEY not set");
-  
+
   const account = privateKeyToAccount(CRE_PRIVATE_KEY as `0x${string}`);
   const publicClient = createPublicClient({
     chain: sepolia,
     transport: http(),
   });
-  
+
   const nonce = await publicClient.getTransactionCount({ address: account.address });
   return nonce;
 }
@@ -144,14 +144,14 @@ async function getLatestTransactionHash(address: string): Promise<string | null>
     chain: sepolia,
     transport: http(),
   });
-  
+
   try {
     const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
     const txs = await publicClient.getBlock({
       blockNumber: latestBlock.number,
       includeTransactions: true
     });
-    
+
     // Find the most recent transaction from our address
     for (let i = txs.transactions.length - 1; i >= 0; i--) {
       const tx = txs.transactions[i];
@@ -172,7 +172,7 @@ async function getBalance(tokenAddress: string, accountAddress: string): Promise
     chain: sepolia,
     transport: http(),
   });
-  
+
   if (tokenAddress === "0x0000000000000000000000000000000000000000") {
     // ETH balance
     return await publicClient.getBalance({ address: accountAddress as `0x${string}` });
@@ -180,7 +180,7 @@ async function getBalance(tokenAddress: string, accountAddress: string): Promise
     // ERC20 balance
     return await publicClient.readContract({
       address: tokenAddress as `0x${string}`,
-      abi: [{"constant": true, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"}],
+      abi: [{ "constant": true, "inputs": [{ "name": "_owner", "type": "address" }], "name": "balanceOf", "outputs": [{ "name": "balance", "type": "uint256" }], "type": "function" }],
       functionName: "balanceOf",
       args: [accountAddress]
     }) as bigint;
@@ -198,7 +198,7 @@ async function placeCreOrder(params: {
 }): Promise<{ ok: boolean; txHash?: string; error?: string }> {
   const nonce = await getNonce(params.questionId);
   const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
-  
+
   const result = await callCre("order", {
     questionId: params.questionId,
     conditionId: params.conditionId,
@@ -209,13 +209,13 @@ async function placeCreOrder(params: {
     nonce: nonce.toString(),
     deadline: deadline.toString(),
   });
-  
+
   if (!result.ok) return { ok: false, error: result.error };
-  
+
   // Extract txHash from CRE response if available
   const data = result.data as any;
   const txHash = data?.txHash || data?.transactionHash || "";
-  
+
   return { ok: true, txHash: txHash || undefined };
 }
 
@@ -230,7 +230,7 @@ async function placeCreMarketOrder(params: {
 }): Promise<{ ok: boolean; txHash?: string; error?: string }> {
   const nonce = await getNonce(params.questionId);
   const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
-  
+
   const action = params.buy ? "buy" : "sell";
   const result = await callCre(action, {
     questionId: params.questionId,
@@ -242,13 +242,13 @@ async function placeCreMarketOrder(params: {
     nonce: nonce.toString(),
     deadline: deadline.toString(),
   });
-  
+
   if (!result.ok) return { ok: false, error: result.error };
-  
+
   // Extract txHash from CRE response if available
   const data = result.data as any;
   const txHash = data?.txHash || data?.transactionHash || "";
-  
+
   return { ok: true, txHash: txHash || undefined };
 }
 
@@ -329,7 +329,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       questionId = market?.questionId ?? marketId;
       conditionId = market?.conditionId ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
     }
-    
+
     // If still no market found, create minimal info for CRE trading
     if (!market) {
       market = { name: `CRE Market ${questionId.slice(0, 10)}...`, outcomes: [{}, {}] };
@@ -345,10 +345,10 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
     questionId = market.questionId ?? marketId;
     conditionId = market.conditionId ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
   }
-  
+
   const name = market.name ?? marketId;
   const outcomeCount = Array.isArray(market.outcomes) ? market.outcomes.length : 2;
-  
+
   log(`Market: ${name} (outcomes: ${outcomeCount})`, "info");
   log(`QuestionId: ${questionId}`, "info");
   log(`ConditionId: ${conditionId}`, "info");
@@ -367,7 +367,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
     const usdcAddress = "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF";
     const ethBalance = await getBalance("0x0000000000000000000000000000000000000000", account.address);
     const usdcBalance = await getBalance(usdcAddress, account.address);
-    
+
     log(`Account: ${account.address}`, "info");
     log(`ETH Balance: ${formatEther(ethBalance)} ETH`, "info");
     log(`USDC Balance: ${formatEther(usdcBalance)} USDC`, "info");
@@ -391,7 +391,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       log(`CRE BID failed: ${bidRes.error}`, "fail");
       return false;
     }
-    
+
     // Get real txHash from blockchain
     let realTxHash = bidRes.txHash;
     if (!realTxHash && CRE_PRIVATE_KEY) {
@@ -416,7 +416,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       log(`CRE ASK failed: ${askRes.error}`, "fail");
       return false;
     }
-    
+
     // Get real txHash from blockchain
     realTxHash = askRes.txHash;
     if (!realTxHash && CRE_PRIVATE_KEY) {
@@ -441,7 +441,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       log(`CRE MARKET failed: ${marketRes.error}`, "fail");
       return false;
     }
-    
+
     // Get real txHash from blockchain
     realTxHash = marketRes.txHash;
     if (!realTxHash && CRE_PRIVATE_KEY) {
@@ -531,7 +531,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`Enhanced Bid/Ask/Trade live test (${cre ? "CRE Direct" : "Backend API"}${broadcast ? " + BROADCAST" : ""})`);
-  
+
   if (cre) {
     console.log(`CRE_HTTP_URL=${CRE_HTTP_URL ?? "(not set)"}`);
     console.log(`CRE_PRIVATE_KEY=${CRE_PRIVATE_KEY ? "***" : "(not set)"}`);
