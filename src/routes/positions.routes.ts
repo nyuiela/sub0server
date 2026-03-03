@@ -11,24 +11,9 @@ import {
   type PositionUpdateInput,
   type PositionQueryInput,
 } from "../schemas/position.schema.js";
+import { Prisma } from "@prisma/client";
 
-function serializePosition(position: {
-  id: string;
-  marketId: string;
-  userId: string | null;
-  agentId: string | null;
-  address: string;
-  tokenAddress: string;
-  outcomeIndex: number;
-  side: string;
-  status: string;
-  avgPrice: { toString(): string };
-  collateralLocked: { toString(): string };
-  isAmm: boolean;
-  contractPositionId: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
+function serializePosition(position: Prisma.PositionGetPayload<{}>) {
   return {
     ...position,
     avgPrice: position.avgPrice.toString(),
@@ -48,8 +33,8 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
     const platformAddr = config.platformLiquidityAddress?.trim();
     const chainWhere =
       chainKey === "main"
-        ? { OR: [{ chainKey: "main" }, { chainKey: null }] as const }
-        : { chainKey: "tenderly" as const };
+        ? { OR: [{ chainKey: "main" }, { chainKey: null }] }
+        : { chainKey: "tenderly" };
     const where = {
       ...(marketId ? { marketId } : {}),
       ...(userId ? { userId } : {}),
@@ -89,12 +74,14 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
     }
 
     return reply.send({
-      data: positions.map((p) => {
-        const out = { ...serializePosition(p), market: p.market } as ReturnType<typeof serializePosition> & { market: typeof positions[0]["market"]; lastReason?: string };
-        if (includeLatestReason && agentId) {
-          const reason = reasonByMarket.get(p.marketId);
-          if (reason) out.lastReason = reason;
-        }
+      data: positions.map((position) => {
+        const out = {
+          ...serializePosition(position),
+          market: position.market,
+          ...(includeLatestReason && agentId && reasonByMarket.get(position.marketId)
+            ? { lastReason: reasonByMarket.get(position.marketId) }
+            : {}),
+        };
         return out;
       }),
       total,

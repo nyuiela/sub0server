@@ -241,6 +241,7 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
       data: {
         status: "DISCARDED",
         discardReason: decision.reason?.slice(0, 2000) ?? null,
+        tradeReason: decision.reason?.slice(0, 2000) ?? "no reason provided",
         nextRunAt: followUpMs > 0 ? nextRun : null,
       },
     });

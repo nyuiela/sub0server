@@ -111,7 +111,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
       const id = req.params.id?.trim() ?? "";
       if (!id) return reply.code(400).send({ error: "Simulation id required" });
       const prisma = getPrismaClient();
-      const sim = await prisma.simulation.findFirst({
+      const simulation = await prisma.simulation.findFirst({
         where: { id, ownerId: user.userId },
         select: {
           id: true,
@@ -128,28 +128,30 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
               marketId: true,
               status: true,
               discardReason: true,
+              tradeReason: true,
               market: { select: { id: true, name: true, status: true } },
             },
           },
         },
       });
-      if (!sim) return reply.code(404).send({ error: "Simulation not found" });
+      if (!simulation) return reply.code(404).send({ error: "Simulation not found" });
       return reply.send({
-        id: sim.id,
-        agentId: sim.agentId,
-        agentName: sim.agent.name,
-        dateRangeStart: sim.dateRangeStart.toISOString(),
-        dateRangeEnd: sim.dateRangeEnd.toISOString(),
-        maxMarkets: sim.maxMarkets,
-        durationMinutes: sim.durationMinutes,
-        status: sim.status,
-        createdAt: sim.createdAt.toISOString(),
-        markets: sim.enqueuedMarkets.map((e) => ({
-          marketId: e.marketId,
-          marketName: e.market?.name,
-          marketStatus: e.market?.status,
-          status: e.status,
-          discardReason: e.discardReason ?? undefined,
+        id: simulation.id,
+        agentId: simulation.agentId,
+        agentName: simulation.agent.name,
+        dateRangeStart: simulation.dateRangeStart.toISOString(),
+        dateRangeEnd: simulation.dateRangeEnd.toISOString(),
+        maxMarkets: simulation.maxMarkets,
+        durationMinutes: simulation.durationMinutes,
+        status: simulation.status,
+        createdAt: simulation.createdAt.toISOString(),
+        markets: simulation.enqueuedMarkets.map((enqueuedMarket) => ({
+          marketId: enqueuedMarket.marketId,
+          marketName: enqueuedMarket.market?.name,
+          marketStatus: enqueuedMarket.market?.status,
+          status: enqueuedMarket.status,
+          discardReason: enqueuedMarket.discardReason ?? undefined,
+          tradeReason: enqueuedMarket.tradeReason ?? undefined,
         })),
       });
     }
@@ -446,7 +448,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         },
         orderBy: { resolutionDate: "desc" },
         take: maxMarketsForCap,
-        select: { id: true, status: true, tradeReason: true },
+        select: { id: true, status: true,},
       });
 
       const simulation = await prisma.simulation.create({
@@ -470,7 +472,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
             chainKey: CHAIN_KEY_TENDERLY,
             simulateDateRangeStart: rangeStart,
             simulateDateRangeEnd: rangeEnd,
-            tradeReason: market.,
+            tradeReason: "No reason provided",
           },
         });
         const jobId = await enqueueAgentPredictionNow({
