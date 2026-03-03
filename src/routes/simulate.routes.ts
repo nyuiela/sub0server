@@ -16,7 +16,6 @@ import {
 import { getX402Config } from "../x402/config.js";
 import { computeSimulatePriceUsdc, usdcToAtomic } from "../x402/pricing.js";
 import { paySimulateWithAgent } from "../services/agent-x402-pay.service.js";
-import { MarketStatus } from "@prisma/client";
 
 const USDC_DECIMALS = 6;
 
@@ -432,7 +431,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
           return reply.code(400).send({ error: payResult.error });
         }
       }
-      const marketsInRange: { id: string; status: MarketStatus; agentReasons?: { tradeReason: string }[] }[] = await prisma.market.findMany({
+      const marketsInRange = await prisma.market.findMany({
         where: {
           questionId: { not: null },
           OR: [
@@ -447,7 +446,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         },
         orderBy: { resolutionDate: "desc" },
         take: maxMarketsForCap,
-        select: { id: true, status: true, agentReasons: { select: { agentId: true, tradeReason: true } } },
+        select: { id: true, status: true, tradeReason: true },
       });
 
       const simulation = await prisma.simulation.create({
@@ -471,7 +470,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
             chainKey: CHAIN_KEY_TENDERLY,
             simulateDateRangeStart: rangeStart,
             simulateDateRangeEnd: rangeEnd,
-            tradeReason: market.tradeReason ?? undefined,
+            tradeReason: market.,
           },
         });
         const jobId = await enqueueAgentPredictionNow({
