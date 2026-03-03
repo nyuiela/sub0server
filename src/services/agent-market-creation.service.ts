@@ -25,7 +25,7 @@ import type {
   AgentSource,
 } from "../types/agent-markets.js";
 import { Hex } from "thirdweb";
-import contracts from "../lib/contracts.json" with { type: "json" };
+import contracts from "../lib/contracts.json" assert { type: "json" };
 
 const DEFAULT_DURATION_SECONDS = 86400;
 const DEFAULT_OUTCOME_SLOT_COUNT = 2;

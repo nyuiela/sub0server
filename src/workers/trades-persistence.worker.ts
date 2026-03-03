@@ -20,6 +20,35 @@ import type { ExecutedTrade, EngineOrder } from "../types/order-book.js";
 import type { CreOrderPayload } from "../types/cre-order.js";
 import { TRADES_QUEUE_NAME, type TradesJobPayload } from "./trades-queue.js";
 import { executeUserTradeOnCre, executeAgentTradeOnCre, executeUserMarketTradeOnCre } from "../services/cre-execute-trade.service.js";
+import {
+  createEnhancedPosition,
+  updateEnhancedPosition,
+  createEnhancedTrade,
+  updateBalanceAfterTrade,
+  validateTradeExecution
+} from "../services/enhanced-position-service.js";
+
+/**
+ * Gets the human-readable outcome string for a market
+ */
+async function getOutcomeString(marketId: string, outcomeIndex: number): Promise<string> {
+  const prisma = getPrismaClient();
+  const market = await prisma.market.findUnique({
+    where: { id: marketId },
+    select: { outcomes: true },
+  });
+
+  if (!market) {
+    return `Outcome ${outcomeIndex}`;
+  }
+
+  const outcomes = market.outcomes as unknown[];
+  if (Array.isArray(outcomes) && outcomeIndex < outcomes.length) {
+    return String(outcomes[outcomeIndex]);
+  }
+
+  return `Outcome ${outcomeIndex}`;
+}
 
 async function resolveAddress(
   prisma: PrismaClient,
@@ -146,22 +175,21 @@ async function applyTradesToPositions(
           },
         });
       } else {
-        await prisma.position.create({
-          data: {
-            marketId: t.marketId,
-            outcomeIndex: t.outcomeIndex,
-            address: buyerAddress,
-            userId: buyerUserId ?? undefined,
-            agentId: buyerAgentId ?? undefined,
-            tokenAddress: collateralToken,
-            contractPositionId,
-            side: "LONG",
-            status: "OPEN",
-            avgPrice: newAvg,
-            collateralLocked: newLocked,
-            isAmm: false,
-            chainKey: positionChainKey,
-          },
+        // Create new LONG position using enhanced service
+        await createEnhancedPosition({
+          marketId: t.marketId,
+          outcomeIndex: t.outcomeIndex,
+          address: buyerAddress,
+          tokenAddress: collateralToken,
+          side: "LONG",
+          avgPrice: newAvg.toFixed(18),
+          collateralLocked: newLocked.toFixed(18),
+          isAmm: false,
+          contractPositionId: contractPositionId || undefined,
+          chainKey: positionChainKey || "main",
+          userId: buyerUserId ?? undefined,
+          agentId: buyerAgentId ?? undefined,
+          tradeReason: buyerAgentId ? "Agent opened LONG position" : "User opened LONG position",
         });
       }
     }
@@ -194,6 +222,7 @@ async function applyTradesToPositions(
               data: {
                 marketId: t.marketId,
                 outcomeIndex: t.outcomeIndex,
+                outcomeString: await getOutcomeString(t.marketId, t.outcomeIndex),
                 address: sellerAddress,
                 userId: sellerUserId ?? undefined,
                 agentId: sellerAgentId ?? undefined,

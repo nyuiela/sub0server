@@ -13,15 +13,40 @@ import {
 } from "../schemas/position.schema.js";
 import { Prisma } from "@prisma/client";
 import { getPublicClient } from "../services/agent-onboarding.service.js";
-import contracts from "../lib/contracts.json" with { type: "json" };
+import contracts from "../lib/contracts.json" assert { type: "json" };
 import { Abi } from "thirdweb/utils";
 import { USDC_DECIMALS } from "../lib/eip712-quote.js";
 
-function serializePosition(position: Prisma.PositionGetPayload<{}>) {
+function serializePosition(position: Prisma.PositionGetPayload<{ include: { market: { select: { outcomes: true } } } }>) {
+  // Ensure outcomeString is populated from market outcomes if not already set
+  let outcomeString = position.outcomeString;
+  if (!outcomeString && position.market?.outcomes) {
+    const outcomes = position.market.outcomes as unknown[];
+    if (Array.isArray(outcomes) && position.outcomeIndex < outcomes.length) {
+      outcomeString = String(outcomes[position.outcomeIndex]);
+    }
+  }
+  
   return {
     ...position,
     avgPrice: position.avgPrice.toString(),
     collateralLocked: position.collateralLocked.toString(),
+    // Include new fields with fallbacks
+    outcomeString: outcomeString || undefined,
+    chainKey: position.chainKey || undefined,
+    tradeReason: position.tradeReason || undefined,
+  };
+}
+
+function serializePositionBasic(position: Prisma.PositionGetPayload<{}>) {
+  return {
+    ...position,
+    avgPrice: position.avgPrice.toString(),
+    collateralLocked: position.collateralLocked.toString(),
+    // Include new fields with fallbacks
+    outcomeString: position.outcomeString || undefined,
+    chainKey: position.chainKey || undefined,
+    tradeReason: position.tradeReason || undefined,
   };
 }
 
@@ -54,7 +79,16 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: { market: { select: { id: true, name: true, conditionId: true } } },
+        include: { 
+          market: { 
+            select: { 
+              id: true, 
+              name: true, 
+              conditionId: true,
+              outcomes: true  // Include outcomes array
+            } 
+          } 
+        },
       }),
       prisma.position.count({ where }),
     ]);
@@ -160,7 +194,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       marketId: position.marketId,
       reason: MARKET_UPDATE_REASON.POSITION,
     });
-    return reply.send({ ...serializePosition(position), market: position.market });
+    return reply.send(serializePositionBasic(position));
   });
 
   app.delete("/api/positions/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

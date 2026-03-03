@@ -74,13 +74,15 @@ MARKET: ${ctx.marketName}
 OUTCOMES (index required for outcomeIndex):
 ${outcomeList}
 ${posBlock}
+OUTCOME TEXT: ${ctx.outcomes.map((o, i) => `  ${i}: ${o}`).join("\n")}
 
-AGENT: ${ctx.agentName}${ctx.personaSummary ? `\nPERSONA (summary): ${ctx.personaSummary.slice(0, 500)}` : ""}
+AGENT: ${ctx.agentName}${ctx.personaSummary ? `\nPERSONA (summary): ${ctx.personaSummary.slice(0, 2000)}` : ""}
 
 Respond with JSON only, no markdown:
 {
   "action": "skip" | "buy" | "sell",
   "outcomeIndex": 0,
+  "outcomeText": "outcome text",
   "quantity": "10",
   "reason": "one sentence",
   "nextFollowUpInMs": 3600000
@@ -90,11 +92,12 @@ Respond with JSON only, no markdown:
 - nextFollowUpInMs (optional): when to re-run analysis (ms from now). E.g. 3600000 = 1h, 86400000 = 24h. Omit for default.`;
 }
 
-function parseTradingResponse(text: string, ctx: AgentMarketContext): TradingDecision {
+function parseTradingResponse(text: string, outcomeText: string, ctx: AgentMarketContext): TradingDecision {
   const raw = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   let parsed: {
     action?: string;
     outcomeIndex?: number;
+    outcomeText?: string;
     quantity?: string;
     reason?: string;
     nextFollowUpInMs?: number;
@@ -126,7 +129,7 @@ function parseTradingResponse(text: string, ctx: AgentMarketContext): TradingDec
   };
 }
 
-async function callGeminiTrading(ctx: AgentMarketContext, model: string): Promise<string> {
+async function callGeminiTrading(ctx: AgentMarketContext, model: string): Promise<{ text: string; outcomeText: string }> {
   const apiKey = getNextGeminiKeyTrading();
   if (!apiKey?.trim()) {
     throw new Error("No Gemini trading key configured");
@@ -153,11 +156,13 @@ async function callGeminiTrading(ctx: AgentMarketContext, model: string): Promis
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const outcomeText = data?.candidates?.[0]?.content?.parts?.[1]?.text?.trim();
   if (!text) throw new Error("Empty Gemini response");
-  return text;
+  if (!outcomeText) throw new Error("Empty Gemini outcome text");
+  return { text, outcomeText };
 }
 
-async function callGrokTrading(ctx: AgentMarketContext, model: string): Promise<string> {
+async function callGrokTrading(ctx: AgentMarketContext, model: string): Promise<{ text: string; outcomeText: string }> {
   const apiKey = getNextGrokKey() ?? config.grokApiKey;
   if (!apiKey?.trim()) {
     throw new Error("No Grok/XAI API key configured");
@@ -184,8 +189,10 @@ async function callGrokTrading(ctx: AgentMarketContext, model: string): Promise<
   }
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
   const text = data?.choices?.[0]?.message?.content?.trim();
+  const outcomeText = data?.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error("Empty Grok response");
-  return text;
+  if (!outcomeText) throw new Error("Empty Grok outcome text");
+  return { text, outcomeText };
 }
 
 export async function runTradingAnalysis(ctx: AgentMarketContext): Promise<TradingDecision> {
@@ -193,14 +200,21 @@ export async function runTradingAnalysis(ctx: AgentMarketContext): Promise<Tradi
 
   try {
     let text: string;
+    let outcomeText: string;
     if (isGrokModel(effectiveModel)) {
-      text = await callGrokTrading(ctx, effectiveModel);
+      const result = await callGrokTrading(ctx, effectiveModel);
+      text = result.text;
+      outcomeText = result.outcomeText;
     } else if (isGeminiModel(effectiveModel)) {
-      text = await callGeminiTrading(ctx, effectiveModel);
+      const result = await callGeminiTrading(ctx, effectiveModel);
+      text = result.text;
+      outcomeText = result.outcomeText;
     } else {
-      text = await callGeminiTrading(ctx, DEFAULT_MODEL);
+      const result = await callGeminiTrading(ctx, DEFAULT_MODEL);
+      text = result.text;
+      outcomeText = result.outcomeText;
     }
-    return parseTradingResponse(text, ctx);
+    return parseTradingResponse(text, outcomeText, ctx);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("No Gemini trading key") || message.includes("No Grok/XAI")) {

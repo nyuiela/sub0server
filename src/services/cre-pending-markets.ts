@@ -207,6 +207,7 @@ async function persistMarketFromChain(
           outcomeCount,
           draft.collateralToken,
           outcomePositionIds
+          
         );
         const amountUsdcRaw = config.platformSeedAmountUsdcRaw;
         let seeded = false;
