@@ -19,7 +19,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { ExecutedTrade, EngineOrder } from "../types/order-book.js";
 import type { CreOrderPayload } from "../types/cre-order.js";
 import { TRADES_QUEUE_NAME, type TradesJobPayload } from "./trades-queue.js";
-import { executeUserTradeOnCre, executeAgentTradeOnCre } from "../services/cre-execute-trade.service.js";
+import { executeUserTradeOnCre, executeAgentTradeOnCre, executeUserMarketTradeOnCre } from "../services/cre-execute-trade.service.js";
 
 async function resolveAddress(
   prisma: PrismaClient,
@@ -132,9 +132,9 @@ async function applyTradesToPositions(
       const newAvg =
         existing && new Decimal(existing.collateralLocked.toString()).gt(0)
           ? new Decimal(existing.avgPrice.toString())
-              .times(existing.collateralLocked.toString())
-              .plus(price.times(t.quantity))
-              .div(newLocked)
+            .times(existing.collateralLocked.toString())
+            .plus(price.times(t.quantity))
+            .div(newLocked)
           : price;
       if (existing) {
         await prisma.position.update({
@@ -265,7 +265,9 @@ async function executeCreTrades(
   if (order?.status === "FILLED" && order.crePayload != null) {
     const payload = order.crePayload as CreOrderPayload;
     if (payload.userSignature) {
-      const result = await executeUserTradeOnCre(payload);
+      // const result = await executeUserTradeOnCre(payload);
+      await executeUserMarketTradeOnCre(payload, order.side);
+
       if (!result.ok) {
         console.warn(`CRE user trade failed (order ${order.id}):`, result.error);
       }
