@@ -24,6 +24,7 @@
     "feed": "tsx src/services/price-feed.service.ts",
     "live-test": "tsx src/scripts/live-test.ts",
     "bid-ask-trade-live": "tsx src/scripts/bid-ask-trade-live.ts",
+    "bid-ask-trade-enhanced": "tsx src/scripts/bid-ask-trade-enhanced.ts",
     "ws-test": "tsx src/scripts/ws-test.ts",
     "stake-verify": "tsx src/scripts/stake-verify-live.ts",
     "news-ingest": "tsx src/workers/news-ingest.worker.ts",
