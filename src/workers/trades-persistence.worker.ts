@@ -112,7 +112,7 @@ async function applyTradesToPositions(
 
     const positionWhereChain =
       positionChainKey === "main"
-        ? { OR: [{ chainKey: "main" }, { chainKey: null }] as const }
+        ? { OR: [{ chainKey: "main" }, { chainKey: null }] }
         : { chainKey: positionChainKey };
 
     if (buyerAddress) {
