@@ -396,7 +396,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
     let realTxHash = bidRes.txHash;
     if (!realTxHash && CRE_PRIVATE_KEY) {
       const account = privateKeyToAccount(CRE_PRIVATE_KEY as `0x${string}`);
-      await sleep(2000); // Wait for transaction to be mined
+      await sleep(3000); // Wait longer for transaction to be mined
       const latestTxHash = await getLatestTransactionHash(account.address);
       realTxHash = latestTxHash || undefined;
     }
@@ -421,7 +421,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
     realTxHash = askRes.txHash;
     if (!realTxHash && CRE_PRIVATE_KEY) {
       const account = privateKeyToAccount(CRE_PRIVATE_KEY as `0x${string}`);
-      await sleep(2000); // Wait for transaction to be mined
+      await sleep(3000); // Wait longer for transaction to be mined
       const latestTxHash = await getLatestTransactionHash(account.address);
       realTxHash = latestTxHash || undefined;
     }
@@ -446,7 +446,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
     realTxHash = marketRes.txHash;
     if (!realTxHash && CRE_PRIVATE_KEY) {
       const account = privateKeyToAccount(CRE_PRIVATE_KEY as `0x${string}`);
-      await sleep(2000); // Wait for transaction to be mined
+      await sleep(3000); // Wait longer for transaction to be mined
       const latestTxHash = await getLatestTransactionHash(account.address);
       realTxHash = latestTxHash || undefined;
     }
