@@ -75,15 +75,63 @@ export async function seedMarketLiquidityOnChain(
   }
 
   try {
+    // Validate parameters
+    if (!questionId || !questionId.startsWith('0x')) {
+      console.warn("[seed-market-liquidity] Invalid questionId", { questionId });
+      return false;
+    }
+    
+    if (!amountUsdc || amountUsdc <= 0) {
+      console.warn("[seed-market-liquidity] Invalid amount", { amountUsdc });
+      return false;
+    }
+    
+    // Get current nonce with "pending" to avoid conflicts
+    const currentNonce = await clients.public.getTransactionCount({
+      address: account.address,
+      blockTag: "pending",
+    });
+    
+    // Get current gas prices to ensure we're not underpriced
+    const [gasPrice, maxPriorityFeePerGas] = await Promise.all([
+      clients.public.getGasPrice(),
+      clients.public.estimateMaxPriorityFeePerGas(),
+    ]);
+    
+    // Ensure we have enough gas price to replace any stuck transaction
+    const bumpedMaxFeePerGas = gasPrice + BigInt(1000000000); // +1 Gwei
+    const bumpedMaxPriorityFeePerGas = maxPriorityFeePerGas + BigInt(1000000000); // +1 Gwei
+    
+    console.info("[seed-market-liquidity] Attempting seed", { 
+      questionId, 
+      amountUsdc: amountUsdc.toString(),
+      nonce: currentNonce,
+      vaultAddress,
+      gasPrice: gasPrice.toString(),
+      bumpedMaxFeePerGas: bumpedMaxFeePerGas.toString()
+    });
+    
     const hash = await clients.wallet.writeContract({
       account,
       address: vaultAddress as Hex,
       abi: predictionVaultAbi,
       functionName: "seedMarketLiquidity",
-      args: [questionId, amountUsdc],
+      args: [questionId as Hex, amountUsdc],
       chain: sepolia,
+      nonce: currentNonce,
+      maxFeePerGas: bumpedMaxFeePerGas,
+      maxPriorityFeePerGas: bumpedMaxPriorityFeePerGas,
+      gas: 500000n, // 500k gas limit for seeding transactions
     });
-    const receipt = await clients.public.waitForTransactionReceipt({ hash });
+    
+    // Add timeout for transaction confirmation
+    const receipt = await Promise.race([
+      clients.public.waitForTransactionReceipt({ hash }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Transaction confirmation timeout after 30 seconds')), 30000)
+      )
+    ]) as { status: "success" | "reverted" };
+    
     const ok = receipt.status === "success";
     if (ok) {
       console.info("[seed-market-liquidity] Seeded", { questionId, hash, status: receipt.status });
@@ -93,6 +141,76 @@ export async function seedMarketLiquidityOnChain(
     return ok;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    
+    // Handle specific errors gracefully
+    if (msg.includes('could not replace existing tx') || msg.includes('replacement transaction underpriced') || msg.includes('nonce too low')) {
+      console.warn("[seed-market-liquidity] Transaction conflict or underpriced, retrying with higher gas...", { questionId, error: msg });
+      
+      // Wait a bit and retry with even higher gas
+      await new Promise(r => setTimeout(r, 3000));
+      
+      try {
+        // Get fresh nonce and gas prices for retry
+        const currentNonce = await clients.public.getTransactionCount({
+          address: account.address,
+          blockTag: "pending",
+        });
+        
+        const [gasPrice, maxPriorityFeePerGas] = await Promise.all([
+          clients.public.getGasPrice(),
+          clients.public.estimateMaxPriorityFeePerGas(),
+        ]);
+        
+        // Even higher gas for retry
+        const retryMaxFeePerGas = gasPrice + BigInt(2000000000); // +2 Gwei
+        const retryMaxPriorityFeePerGas = maxPriorityFeePerGas + BigInt(2000000000); // +2 Gwei
+        
+        console.info("[seed-market-liquidity] Retry with higher gas", { 
+          questionId, 
+          nonce: currentNonce,
+          retryMaxFeePerGas: retryMaxFeePerGas.toString()
+        });
+        
+        const hash = await clients.wallet.writeContract({
+          account,
+          address: vaultAddress as Hex,
+          abi: predictionVaultAbi,
+          functionName: "seedMarketLiquidity",
+          args: [questionId as Hex, amountUsdc],
+          chain: sepolia,
+          nonce: currentNonce,
+          maxFeePerGas: retryMaxFeePerGas,
+          maxPriorityFeePerGas: retryMaxPriorityFeePerGas,
+          gas: 500000n, // 500k gas limit for seeding transactions
+        });
+        
+        const receipt = await Promise.race([
+          clients.public.waitForTransactionReceipt({ hash }),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Transaction confirmation timeout after 30 seconds')), 30000)
+          )
+        ]) as { status: "success" | "reverted" };
+        
+        const ok = receipt.status === "success";
+        if (ok) {
+          console.info("[seed-market-liquidity] Retry succeeded", { questionId, hash, status: receipt.status });
+        } else {
+          console.warn("[seed-market-liquidity] Retry reverted", { questionId, hash, status: receipt.status });
+        }
+        return ok;
+        
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        console.warn("[seed-market-liquidity] Retry also failed", { questionId, error: retryMsg });
+        return false;
+      }
+    }
+    
+    if (msg.includes('insufficient funds') || msg.includes('balance')) {
+      console.warn("[seed-market-liquidity] Insufficient funds", { questionId, error: msg });
+      return false;
+    }
+    
     console.warn("[seed-market-liquidity] Failed", { questionId, error: msg });
     return false;
   }
