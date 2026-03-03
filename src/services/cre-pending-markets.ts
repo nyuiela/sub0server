@@ -191,11 +191,7 @@ async function persistMarketFromChain(
     const needsChainData = draft && (draft.questionId == null || draft.conditionId == null);
     if (needsChainData && draft) {
       const outcomeCount = Number(chainMarket.outcomeSlotCount);
-      const collateralToken =
-        config.defaultCollateralToken?.trim() &&
-        config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
-          ? config.defaultCollateralToken
-          : contractsData.contracts?.usdc ?? "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+      const collateralToken = contractsData.contracts?.usdc!;
       const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
       if (outcomePositionIds != null) {
         await prisma.market.update({
@@ -245,10 +241,10 @@ async function persistMarketFromChain(
   const outcomeCount = Number(chainMarket.outcomeSlotCount);
   const collateralToken =
     config.defaultCollateralToken?.trim() &&
-    config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
+      config.defaultCollateralToken !== "0x0000000000000000000000000000000000000000"
       ? config.defaultCollateralToken
       : (contractsData as { contracts?: { usdc?: string } }).contracts?.usdc ??
-        "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
+      "0x0ecdaB3BfcA91222b162A624D893bF49ec16ddBE";
 
   const outcomePositionIds = await getOutcomePositionIds(conditionId, collateralToken, outcomeCount);
   if (outcomePositionIds == null) {
@@ -319,8 +315,8 @@ function rawUsdcToDecimalString(raw: bigint): string {
   const divisor = BigInt(10 ** USDC_DECIMALS);
   const intPart = raw / divisor;
   const fracPart = raw % divisor;
-  const fracStr = fracPart.toString().padStart(USDC_DECIMALS, "0").slice(0, 8);
-  return fracStr === "0".repeat(8) ? intPart.toString() : `${intPart}.${fracStr}`;
+  // const fracStr = fracPart.toString().padStart(USDC_DECIMALS, "0").slice(0, 8);
+  return intPart.toString();
 }
 
 export async function runPoll(): Promise<void> {

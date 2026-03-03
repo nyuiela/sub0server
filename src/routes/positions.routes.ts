@@ -12,6 +12,10 @@ import {
   type PositionQueryInput,
 } from "../schemas/position.schema.js";
 import { Prisma } from "@prisma/client";
+import { getPublicClient } from "../services/agent-onboarding.service.js";
+import contracts from "../lib/contracts.json" with { type: "json" };
+import { Abi } from "thirdweb/utils";
+import { USDC_DECIMALS } from "../lib/eip712-quote.js";
 
 function serializePosition(position: Prisma.PositionGetPayload<{}>) {
   return {
@@ -174,5 +178,47 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       });
     }
     return reply.code(204).send();
+  });
+
+  const ERC1155_ABI = {
+    "inputs": [
+      { "internalType": "address", "name": "account", "type": "address" },
+      { "internalType": "uint256", "name": "id", "type": "uint256" }
+    ],
+    "name": "balanceOf",
+    "outputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  } as const;
+
+  async function getChainPosition(positionId: string, address: string) {
+    const client = getPublicClient();
+    if (!client) return null;
+    const balance = await client.readContract({
+      address: contracts.contracts?.conditionalTokens as `0x${string}`,
+      abi: [ERC1155_ABI] as Abi,
+      functionName: "balanceOf",
+      args: [address, positionId],
+    });
+    return balance as any;
+  }
+  app.get("/api/positions/:marketId/:address", async (req: FastifyRequest<{ Params: { marketId: string; address: string } }>, reply: FastifyReply) => {
+    const prisma = getPrismaClient();
+    // const positions = await prisma.position.findMany({ where: { marketId: req.params.marketId }, include: { market: { select: { id: true, name: true } } } });
+    const markets = await prisma.market.findUnique({ where: { id: req.params.marketId }, include: { positions: true } });
+    const positions: Array<string> | null = markets?.outcomePositionIds as unknown as Array<string> | null;
+    const balances: string[] = [];
+    for (const position of positions ?? []) {
+      if (position) {
+        const balance = await getChainPosition(position, req.params.address);
+        console.log(balance);
+        // balances.set(position, balance ?? 0);
+        balances.push(balance.toString());
+      }
+    }
+
+    return reply.send({ balances });
   });
 }

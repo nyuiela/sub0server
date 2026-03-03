@@ -68,7 +68,7 @@ const ERC1155_SET_APPROVAL_FOR_ALL_ABI = [
 
 let publicClient: ReturnType<typeof createPublicClient> | null = null;
 
-function getPublicClient(): ReturnType<typeof createPublicClient> | null {
+export function getPublicClient(): ReturnType<typeof createPublicClient> | null {
   const rpcUrl = config.chainRpcUrl;
   if (!rpcUrl?.trim()) return null;
   if (publicClient === null) {
