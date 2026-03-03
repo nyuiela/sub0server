@@ -166,6 +166,13 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           status: "FILLED",
           trades: [{ ...trade }],
           txHash: creResult.txHash,
+          snapshot: {
+            marketId: raw.marketId,
+            outcomeIndex: raw.outcomeIndex,
+            bids: [],
+            asks: [],
+            timestamp: Date.now(),
+          },
         });
       } catch (err) {
         req.log.error(err);

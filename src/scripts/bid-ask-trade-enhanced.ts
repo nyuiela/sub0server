@@ -384,7 +384,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       outcomeIndex,
       buy: true,
       quantity: "1000000000000000000", // 1 ETH
-      maxCostUsdc: "400000", // 0.4 USDC
+      maxCostUsdc: "1000000000", // 1,000 USDC
     });
     if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
     if (!bidRes.ok) {
@@ -409,7 +409,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       outcomeIndex,
       buy: false,
       quantity: "300000000000000000", // 0.3 ETH
-      maxCostUsdc: "150000", // 0.15 USDC
+      maxCostUsdc: "750000000", // 750 USDC
     });
     if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
     if (!askRes.ok) {
@@ -435,7 +435,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
       outcomeIndex,
       buy: true,
       quantity: "500000000000000000", // 0.5 ETH
-      maxCostUsdc: "250000", // 0.25 USDC
+      maxCostUsdc: "1250000000", // 1,250 USDC
     });
     if (!marketRes.ok) {
       log(`CRE MARKET failed: ${marketRes.error}`, "fail");
@@ -563,10 +563,18 @@ async function main(): Promise<void> {
   }
 
   let cycleIndex = 0;
+  let cachedMarketIds: string[] = [];
   while (!shutdown) {
     cycleIndex++;
     const marketIds =
-      cliMarketIds.length > 0 ? cliMarketIds : await fetchOpenMarkets();
+      cliMarketIds.length > 0 ? cliMarketIds : 
+      cachedMarketIds.length > 0 ? await fetchOpenMarkets() : cachedMarketIds;
+    
+    // Cache markets for subsequent cycles to reduce API calls
+    if (cliMarketIds.length === 0 && marketIds.length > 0) {
+      cachedMarketIds = marketIds;
+    }
+    
     if (marketIds.length === 0) {
       log(`[Cycle ${cycleIndex}] No OPEN markets; waiting ${INTERVAL_MS}ms...`, "info");
     } else {
