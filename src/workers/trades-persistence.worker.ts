@@ -185,7 +185,7 @@ async function applyTradesToPositions(
           avgPrice: newAvg.toFixed(18),
           collateralLocked: newLocked.toFixed(18),
           isAmm: false,
-          contractPositionId,
+          contractPositionId: contractPositionId || undefined,
           chainKey: positionChainKey || "main",
           userId: buyerUserId ?? undefined,
           agentId: buyerAgentId ?? undefined,

@@ -65,9 +65,9 @@ function rawUsdcToDecimalString(raw: bigint): string {
   const USDC_DECIMALS = 6;
   const divisor = BigInt(10 ** USDC_DECIMALS);
   const intPart = raw / divisor;
-  const fracPart = raw % divisor;
-  const fracStr = fracPart.toString().padStart(USDC_DECIMALS, "0").slice(0, 8);
-  return fracStr === "0".repeat(8) ? intPart.toString() : `${intPart}.${fracStr}`;
+  // const fracPart = raw % divisor;
+  // const fracStr = fracPart.toString().padStart(USDC_DECIMALS, "0").slice(0, 8);
+  return intPart.toString();
 }
 
 const GET_MARKET_RETRY_MS = 3_000;

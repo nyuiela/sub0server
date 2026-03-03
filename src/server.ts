@@ -29,6 +29,8 @@ import { registerSdkAgentRoutes } from "./routes/sdk-agent.routes.js";
 import { registerSdkApiRoutes } from "./routes/sdk-api.routes.js";
 import { registerSettlementInternalRoutes } from "./routes/settlement-internal.routes.js";
 import { registerCreCallbackRoutes } from "./routes/cre-callback.routes.js";
+import { registerTradesRoutes } from "./routes/trades.routes.js";
+import { registerUserBalanceRoutes } from "./routes/user-balances.routes.js";
 import { registerSimulateRoutes } from "./routes/simulate.routes.js";
 import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
 import { startCreMarketCron, stopCreMarketCron } from "./services/cre-market-cron.js";
@@ -190,6 +192,8 @@ await registerActivityRoutes(fastify);
 await registerRegisterRoutes(fastify);
 await registerFeedRoutes(fastify);
 await registerSettingsRoutes(fastify);
+await registerTradesRoutes(fastify);
+await registerUserBalanceRoutes(fastify);
 await registerSimulateRoutes(fastify);
 
 const start = async () => {

@@ -13,6 +13,8 @@ import { getRedisPublisher } from "../lib/redis.js";
 import { REDIS_CHANNELS } from "../config/index.js";
 import type { EngineOrder, ExecutedTrade } from "../types/order-book.js";
 
+import { updateUserBalance } from "../services/user-balance.service.js";
+
 export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
   app.post("/api/orders", async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
     if (!requireUserOrApiKey(req, reply)) return;
@@ -98,6 +100,25 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
             message: creResult.error ?? "Unknown error",
           });
         }
+        
+        // Deduct from user wallet for successful trades
+        if (creResult.ok && creResult.txHash && userId && raw.tradeCostUsdc) {
+          try {
+            await updateUserBalance({
+              userId,
+              tokenAddress: "0x039e2f66377121eFa1d9bB2aA7a765A7a7a7a7a7a", // USDC address - replace with actual
+              amount: raw.tradeCostUsdc,
+              operation: 'deduct',
+              txHash: creResult.txHash,
+              reason: 'Market trade execution',
+            });
+            console.log(`User wallet deducted: ${userId}, amount: ${raw.tradeCostUsdc}, txHash: ${creResult.txHash}`);
+          } catch (balanceError) {
+            console.error("Failed to deduct user balance:", balanceError);
+            // Don't fail the trade, but log the issue
+          }
+        }
+        
         const qtyStr = String(raw.quantity);
         // const priceStr = new Decimal(crePayload.tradeCostUsdc).div(1e6).div(qtyStr).toFixed(18);
         const executedAt = Date.now();

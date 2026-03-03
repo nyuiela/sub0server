@@ -6,6 +6,517 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id                        String              @id @default(uuid())
+  username                  String?             @unique
+  address                   String              @unique
+  email                     String?
+  imageUrl                  String?
+  authMethod                String?
+  totalVolume               Decimal             @default(0) @db.Decimal(28, 8)
+  pnl                       Decimal             @default(0) @db.Decimal(28, 8)
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+  agents                    Agent[]             @relation("UserToAgent")
+  agentRegistrationsClaimed AgentRegistration[]
+  aiRequests                AiRequest[]
+  positions                 Position[]
+  simulations               Simulation[]
+  trades                    Trade[]
+  vault                     UserVault?
+  balances                  UserBalance[]
+
+  @@index([username])
+}
+
+/// User-level Prediction Vault USDC balance (one row per user).
+model UserVault {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  balance   Decimal  @default(0) @db.Decimal(28, 8)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Agent {
+  id                  String                @id @default(uuid())
+  ownerId             String
+  name                String
+  persona             String
+  publicKey           String
+  /// * CRE-generated deposit/trading wallet; null until create-wallet (CRE createAgentKey) has been run.
+  walletAddress       String?
+  encryptedPrivateKey String
+  modelSettings       Json
+  status              AgentStatus           @default(ACTIVE)
+  balance             Decimal               @default(0) @db.Decimal(28, 8)
+  tradedAmount        Decimal               @default(0) @db.Decimal(28, 8)
+  totalTrades         Int                   @default(0)
+  pnl                 Decimal               @default(0) @db.Decimal(28, 8)
+  templateId          String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  currentExposure     Decimal               @default(0) @db.Decimal(28, 8)
+  maxDrawdown         Decimal               @default(0) @db.Decimal(28, 8)
+  winRate             Float                 @default(0)
+  totalLlmTokens      Int                   @default(0)
+  totalLlmCost        Decimal               @default(0) @db.Decimal(28, 8)
+  activities          Activity[]
+  owner               User                  @relation("UserToAgent", fields: [ownerId], references: [id], onDelete: Cascade)
+  template            Template?             @relation(fields: [templateId], references: [id])
+  chainBalances       AgentChainBalance[]
+  enqueuedMarkets     AgentEnqueuedMarket[]
+  openclaw            AgentOpenClaw?
+  reasoningLogs       AgentReasoning[]
+  registrationClaimed AgentRegistration?
+  strategy            AgentStrategy?
+  tracks              AgentTrack[]
+  aiLogs              AiLog[]
+  pendingTrades       PendingAgentTrade[]
+  positions           Position[]
+  simulations         Simulation[]
+  trades              Trade[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([templateId])
+}
+
+/// One paid simulation run: date range, max markets, duration. Scopes enqueued markets and jobs so runs do not mix.
+model Simulation {
+  id              String                @id @default(uuid())
+  ownerId         String
+  agentId         String
+  dateRangeStart  DateTime
+  dateRangeEnd    DateTime
+  maxMarkets      Int
+  durationMinutes Int
+  status          String                @default("RUNNING")
+  createdAt       DateTime              @default(now())
+  enqueuedMarkets AgentEnqueuedMarket[]
+  agent           Agent                 @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  owner           User                  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([agentId])
+  @@index([createdAt])
+}
+
+/// Balance per trading place (main chain vs Tenderly simulate). One row per agent per chainKey.
+model AgentChainBalance {
+  id        String   @id @default(uuid())
+  agentId   String
+  chainKey  String
+  balance   Decimal  @default(0) @db.Decimal(28, 8)
+  updatedAt DateTime @updatedAt
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, chainKey])
+  @@index([agentId])
+  @@index([chainKey])
+}
+
+/// Agent trade intents that could not be executed (no wallet or insufficient balance). Shown as pending until wallet/funds available.
+model PendingAgentTrade {
+  id            String                  @id @default(uuid())
+  agentId       String
+  marketId      String
+  outcomeIndex  Int                     @default(0)
+  quantity      Decimal                 @db.Decimal(28, 18)
+  pendingReason String
+  orderId       String?
+  createdAt     DateTime                @default(now())
+  fulfilledAt   DateTime?
+  tradeReason   String
+  side          OrderSide
+  status        PendingAgentTradeStatus @default(PENDING)
+  agent         Agent                   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market        Market                  @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([marketId])
+  @@index([status])
+}
+
+/// Markets enqueued for an agent (add-to-agent on Markets page). Used to show "Added (N)" and persist across sessions.
+/// When simulationId is set, row belongs to that simulation run only (session-scoped). When null, main/trigger-all scope.
+/// status: PENDING until agent runs; DISCARDED when agent skips (with discardReason); TRADED when order submitted.
+model AgentEnqueuedMarket {
+  id                     String      @id @default(uuid())
+  agentId                String
+  marketId               String
+  /// * When set, this row belongs to a specific simulation run. Null = main chain / non-simulate.
+  simulationId           String?
+  /// * Trading place: "main" (CHAIN_RPC_URL) or "tenderly" (simulate). Default main.
+  chainKey               String      @default("main")
+  status                 String      @default("PENDING")
+  discardReason          String?
+  nextRunAt              DateTime?
+  /// * Simulate only: start of date range (agent must not use info after this range).
+  simulateDateRangeStart DateTime?
+  /// * Simulate only: end of date range (evaluate market as of this date).
+  simulateDateRangeEnd   DateTime?
+  updatedAt              DateTime    @updatedAt
+  createdAt              DateTime    @default(now())
+  tradeReason            String
+  agent                  Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market                 Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  simulation             Simulation? @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, marketId, simulationId])
+  @@index([agentId])
+  @@index([marketId])
+  @@index([chainKey])
+  @@index([simulationId])
+}
+
+/// OpenClaw long-form docs (soul, persona, skill, etc.) stored as Text for efficiency.
+model AgentOpenClaw {
+  id           String   @id @default(uuid())
+  agentId      String   @unique
+  soul         String?
+  persona      String?
+  skill        String?
+  methodology  String?
+  failed_tests String?
+  context      String?
+  constraints  String?
+  updatedAt    DateTime @updatedAt
+  agent        Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+model AgentStrategy {
+  id              String       @id @default(uuid())
+  agentId         String       @unique
+  preference      StrategyPref @default(HYBRID)
+  maxSlippage     Float
+  spreadTolerance Float
+  agent           Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model AgentTrack {
+  id            String   @id @default(uuid())
+  agentId       String
+  date          DateTime @db.Date
+  volume        Decimal  @default(0) @db.Decimal(28, 8)
+  trades        Int      @default(0)
+  pnl           Decimal  @default(0) @db.Decimal(28, 8)
+  exposure      Decimal  @default(0) @db.Decimal(28, 8)
+  drawdown      Decimal  @default(0) @db.Decimal(28, 8)
+  llmTokensUsed Int      @default(0)
+  llmCost       Decimal  @default(0) @db.Decimal(28, 8)
+  createdAt     DateTime @default(now())
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, date])
+  @@index([agentId])
+  @@index([date])
+}
+
+model Template {
+  id        String   @id @default(uuid())
+  name      String
+  persona   String?
+  imageUrl  String?
+  config    Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  agents    Agent[]
+}
+
+model Market {
+  id                   String                @id @default(uuid())
+  name                 String
+  creatorAddress       String
+  volume               Decimal               @default(0) @db.Decimal(28, 8)
+  context              String?
+  imageUrl             String?
+  outcomes             Json
+  outcomePositionIds   Json?
+  sourceUrl            String?
+  resolutionDate       DateTime
+  oracleAddress        String
+  status               MarketStatus          @default(OPEN)
+  collateralToken      String
+  /// * Set when market is on-chain; null for drafts (not yet created on-chain).
+  conditionId          String?               @unique
+  /// * On-chain questionId (keccak256(encodePacked(question, creator, oracle))). Null for drafts; set when on-chain. Markets without questionId are not listable.
+  questionId           String?               @unique
+  /// * Tx hash of create(Market) when created via CRE. Audit only.
+  createMarketTxHash   String?
+  platform             MarketPlatform        @default(NATIVE)
+  /// * Which AI agent created this market (e.g. gemini, grok). Internal only; not exposed on public API.
+  agentSource          String?
+  /// * Optional rules for agent settlement (benchmark for deliberation). Offchain only.
+  settlementRules      String?
+  liquidity            Decimal?              @db.Decimal(28, 8)
+  confidence           Float?
+  pnl                  Decimal?              @db.Decimal(28, 8)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  liquiditySeeded      Boolean               @default(false)
+  tradeReason          String                @default("No reason")
+  agentEnqueuedMarkets AgentEnqueuedMarket[]
+  agentReasons         AgentReasoning[]
+  aiLogs               AiLog[]
+  settlementLogs       MarketSettlementLog[]
+  news                 News[]
+  orders               Order[]
+  pendingAgentTrades   PendingAgentTrade[]
+  positions            Position[]
+  trades               Trade[]
+
+  @@index([creatorAddress])
+  @@index([status])
+  @@index([conditionId])
+  @@index([questionId])
+  @@index([platform])
+}
+
+/// Log of agent settlement deliberation (e.g. dispute reasons when consensus is false).
+model MarketSettlementLog {
+  id           String   @id @default(uuid())
+  marketId     String
+  questionId   String
+  consensus    Boolean
+  outcomeArray Json?
+  agentAReason String?
+  agentBReason String?
+  createdAt    DateTime @default(now())
+  market       Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+  @@index([questionId])
+}
+
+model Position {
+  id                 String         @id @default(uuid())
+  marketId           String
+  userId             String?
+  agentId            String?
+  address            String
+  tokenAddress       String
+  outcomeIndex       Int
+  side               PositionSide
+  status             PositionStatus @default(OPEN)
+  avgPrice           Decimal        @db.Decimal(28, 18)
+  collateralLocked   Decimal        @db.Decimal(28, 18)
+  isAmm              Boolean        @default(false)
+  contractPositionId String?
+  /// "main" = live chain; "tenderly" = simulate. Null = main (backfill).
+  chainKey           String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  tradeReason        String?
+  latestReason       String?
+  outcomeString      String?
+  agent              Agent?         @relation(fields: [agentId], references: [id])
+  market             Market         @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  user               User?          @relation(fields: [userId], references: [id])
+
+  @@index([marketId])
+  @@index([userId])
+  @@index([agentId])
+  @@index([address])
+  @@index([chainKey])
+}
+
+model Trade {
+  id           String   @id @default(uuid())
+  marketId     String
+  outcomeIndex Int      @default(0)
+  userId       String?
+  agentId      String?
+  side         String
+  amount       Decimal  @db.Decimal(28, 18)
+  price        Decimal  @db.Decimal(28, 18)
+  txHash       String?
+  /// "main" = live chain; "tenderly" = simulate. Null = main (backfill).
+  chainKey     String?
+  createdAt    DateTime @default(now())
+  agent        Agent?   @relation(fields: [agentId], references: [id])
+  market       Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  user         User?    @relation(fields: [userId], references: [id])
+
+  @@index([marketId])
+  @@index([marketId, outcomeIndex])
+  @@index([userId])
+  @@index([agentId])
+  @@index([chainKey])
+}
+
+model Order {
+  id           String   @id @default(uuid())
+  marketId     String
+  outcomeIndex Int      @default(0)
+  side         String
+  type         String   @default("LIMIT")
+  amount       Decimal  @db.Decimal(28, 18)
+  price        Decimal  @db.Decimal(28, 18)
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  userId       String?
+  agentId      String?
+  /// "main" = live chain; "tenderly" = simulate. Set for agent orders.
+  chainKey     String?
+  /// CRE execution: for user orders, EIP-712 quote params + userSignature so we can POST to CRE on fill.
+  crePayload   Json?
+  market       Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+  @@index([marketId, outcomeIndex])
+  @@index([userId])
+  @@index([agentId])
+  @@index([chainKey])
+}
+
+model News {
+  id        String   @id @default(uuid())
+  marketId  String
+  title     String
+  body      String?
+  imageUrl  String?
+  sourceUrl String?
+  createdAt DateTime @default(now())
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId])
+}
+
+/// Raw ingested items from RSS and CryptoPanic. Deduped by source + externalId.
+model FeedItem {
+  id          String   @id @default(uuid())
+  source      String
+  externalId  String
+  title       String
+  body        String?
+  sourceUrl   String?
+  imageUrl    String?
+  publishedAt DateTime
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@unique([source, externalId])
+  @@index([source])
+  @@index([publishedAt])
+}
+
+model UserBalance {
+  id           String   @id @default(uuid())
+  userId       String
+  tokenAddress String
+  balance      Decimal  @db.Decimal(28, 18) @default(0)
+  updatedAt    DateTime @default(now()) @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tokenAddress])
+  @@index([userId])
+  @@index([tokenAddress])
+}
+
+model AiLog {
+  id        String   @id @default(uuid())
+  agentId   String
+  marketId  String?
+  action    String
+  payload   Json?
+  createdAt DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market    Market?  @relation(fields: [marketId], references: [id])
+
+  @@index([agentId])
+  @@index([marketId])
+}
+
+model AgentReasoning {
+  id               String   @id @default(uuid())
+  agentId          String
+  marketId         String?
+  model            String
+  systemPrompt     String?
+  userContext      String
+  reasoning        String?
+  response         String
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  estimatedCost    Decimal  @default(0) @db.Decimal(28, 8)
+  riskScore        Float?
+  actionTaken      String?
+  createdAt        DateTime @default(now())
+  tradeReason      String
+  agent            Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  market           Market?  @relation(fields: [marketId], references: [id])
+
+  @@index([agentId])
+  @@index([marketId])
+  @@index([createdAt])
+}
+
+model AiRequest {
+  id        String   @id @default(uuid())
+  userId    String
+  prompt    String
+  response  String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Activity {
+  id        String   @id @default(uuid())
+  agentId   String
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+/// BYOA: unclaimed agent registration. After claim, links to User and Agent.
+model AgentRegistration {
+  id                  String   @id @default(uuid())
+  apiKeyHash          String
+  claimCode           String   @unique
+  name                String?
+  status              String   @default("UNCLAIMED")
+  claimedByUserId     String?
+  claimedAgentId      String?  @unique
+  walletAddress       String
+  encryptedPrivateKey String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  claimedAgent        Agent?   @relation(fields: [claimedAgentId], references: [id])
+  claimedByUser       User?    @relation(fields: [claimedByUserId], references: [id])
+
+  @@index([apiKeyHash])
+  @@index([claimCode])
+  @@index([status])
+}
+
+model Tool {
+  id              String   @id @default(uuid())
+  name            String
+  url             String
+  description     String
+  imageUrl        String?
+  fee             Decimal  @db.Decimal(28, 8)
+  receiverAddress String
+  inputSchema     Json
+  outputSchema    Json
+  provider        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 enum AgentStatus {
   ACTIVE
   PAUSED
@@ -54,523 +565,4 @@ enum PendingAgentTradeStatus {
 enum OrderSide {
   BID
   ASK
-}
-
-model User {
-  id          String   @id @default(uuid())
-  username    String?  @unique
-  address     String   @unique
-  email       String?
-  imageUrl    String?
-  authMethod  String?  // WALLET | SSO | PASSKEY
-  totalVolume Decimal  @default(0) @db.Decimal(28, 8)
-  pnl         Decimal  @default(0) @db.Decimal(28, 8)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  agents       Agent[]       @relation("UserToAgent")
-  trades       Trade[]
-  positions    Position[]
-  aiRequests   AiRequest[]
-  vault        UserVault?
-  agentRegistrationsClaimed AgentRegistration[]
-  simulations  Simulation[]
-
-  @@index([username])
-}
-
-/// User-level Prediction Vault USDC balance (one row per user).
-model UserVault {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  balance   Decimal  @default(0) @db.Decimal(28, 8)
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-model Agent {
-  id                  String    @id @default(uuid())
-  ownerId             String
-  name                String
-  persona             String    @db.Text
-  publicKey           String
-  /** CRE-generated deposit/trading wallet; null until create-wallet (CRE createAgentKey) has been run. */
-  walletAddress       String?
-  encryptedPrivateKey  String
-  strategy            AgentStrategy?
-  modelSettings       Json
-  status              AgentStatus @default(ACTIVE)
-  balance             Decimal   @default(0) @db.Decimal(28, 8)
-  tradedAmount        Decimal   @default(0) @db.Decimal(28, 8)
-  totalTrades         Int       @default(0)
-  pnl                 Decimal   @default(0) @db.Decimal(28, 8)
-  templateId          String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-
-  currentExposure     Decimal   @default(0) @db.Decimal(28, 8)
-  maxDrawdown         Decimal   @default(0) @db.Decimal(28, 8)
-  winRate             Float     @default(0)
-  totalLlmTokens      Int       @default(0)
-  totalLlmCost        Decimal   @default(0) @db.Decimal(28, 8)
-
-  owner       User             @relation("UserToAgent", fields: [ownerId], references: [id], onDelete: Cascade)
-  template    Template?        @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  openclaw    AgentOpenClaw?
-  trades      Trade[]
-  positions   Position[]
-  aiLogs      AiLog[]
-  activities  Activity[]
-  tracks      AgentTrack[]
-  reasoningLogs AgentReasoning[]
-  enqueuedMarkets AgentEnqueuedMarket[]
-  pendingTrades   PendingAgentTrade[]
-  registrationClaimed AgentRegistration?
-  chainBalances   AgentChainBalance[]
-  simulations     Simulation[]
-
-  @@index([ownerId])
-  @@index([status])
-  @@index([templateId])
-}
-
-/// One paid simulation run: date range, max markets, duration. Scopes enqueued markets and jobs so runs do not mix.
-model Simulation {
-  id               String   @id @default(uuid())
-  ownerId          String
-  agentId          String
-  dateRangeStart   DateTime
-  dateRangeEnd     DateTime
-  maxMarkets       Int
-  durationMinutes  Int
-  status           String   @default("RUNNING") // RUNNING | COMPLETED | CANCELLED
-  createdAt        DateTime @default(now())
-
-  owner User  @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  enqueuedMarkets AgentEnqueuedMarket[]
-
-  @@index([ownerId])
-  @@index([agentId])
-  @@index([createdAt])
-}
-
-/// Balance per trading place (main chain vs Tenderly simulate). One row per agent per chainKey.
-model AgentChainBalance {
-  id        String   @id @default(uuid())
-  agentId   String
-  chainKey  String   // "main" | "tenderly" (main = CHAIN_RPC_URL chain, tenderly = simulate)
-  balance   Decimal  @default(0) @db.Decimal(28, 8)
-  updatedAt DateTime @updatedAt
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, chainKey])
-  @@index([agentId])
-  @@index([chainKey])
-}
-
-/// Agent trade intents that could not be executed (no wallet or insufficient balance). Shown as pending until wallet/funds available.
-model PendingAgentTrade {
-  id           String   @id @default(uuid())
-  agentId      String
-  marketId     String
-  outcomeIndex Int      @default(0)
-  side         OrderSide
-  quantity     Decimal  @db.Decimal(28, 18)
-  status       PendingAgentTradeStatus   @default(PENDING)
-  pendingReason String  // NO_WALLET | INSUFFICIENT_BALANCE
-  orderId      String?  // set when later fulfilled
-  createdAt    DateTime @default(now())
-  fulfilledAt  DateTime?
-  tradeReason  String
-
-  agent  Agent  @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
-
-  @@index([agentId])
-  @@index([marketId])
-  @@index([status])
-}
-
-/// Markets enqueued for an agent (add-to-agent on Markets page). Used to show "Added (N)" and persist across sessions.
-/// When simulationId is set, row belongs to that simulation run only (session-scoped). When null, main/trigger-all scope.
-/// status: PENDING until agent runs; DISCARDED when agent skips (with discardReason); TRADED when order submitted.
-model AgentEnqueuedMarket {
-  id             String    @id @default(uuid())
-  agentId        String
-  marketId       String
-  /** When set, this row belongs to a specific simulation run. Null = main chain / non-simulate. */
-  simulationId   String?
-  /** Trading place: "main" (CHAIN_RPC_URL) or "tenderly" (simulate). Default main. */
-  chainKey       String    @default("main")
-  status         String    @default("PENDING") // PENDING | DISCARDED | TRADED
-  discardReason  String?   @db.Text
-  nextRunAt      DateTime? // when to run analysis again (agent/cron); null = run on next tick
-  /** Simulate only: start of date range (agent must not use info after this range). */
-  simulateDateRangeStart DateTime?
-  /** Simulate only: end of date range (evaluate market as of this date). */
-  simulateDateRangeEnd   DateTime?
-  updatedAt      DateTime  @updatedAt
-  createdAt      DateTime  @default(now())
-  tradeReason    String
-
-  agent      Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  market     Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
-  simulation Simulation? @relation(fields: [simulationId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, marketId, simulationId])
-  @@index([agentId])
-  @@index([marketId])
-  @@index([chainKey])
-  @@index([simulationId])
-}
-
-/// OpenClaw long-form docs (soul, persona, skill, etc.) stored as Text for efficiency.
-model AgentOpenClaw {
-  id           String   @id @default(uuid())
-  agentId      String   @unique
-  soul         String?  @db.Text
-  persona      String?  @db.Text
-  skill        String?  @db.Text
-  methodology  String?  @db.Text
-  failed_tests String?  @db.Text
-  context      String?  @db.Text
-  constraints  String?  @db.Text
-  updatedAt    DateTime @updatedAt
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId])
-}
-
-model AgentStrategy {
-  id              String       @id @default(uuid())
-  agentId         String       @unique
-  preference      StrategyPref @default(HYBRID)
-  maxSlippage     Float
-  spreadTolerance Float
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-}
-
-model AgentTrack {
-  id        String   @id @default(uuid())
-  agentId   String
-  date      DateTime @db.Date
-  volume    Decimal  @default(0) @db.Decimal(28, 8)
-  trades    Int      @default(0)
-  pnl       Decimal  @default(0) @db.Decimal(28, 8)
-  exposure  Decimal  @default(0) @db.Decimal(28, 8)
-  drawdown  Decimal  @default(0) @db.Decimal(28, 8)
-  llmTokensUsed Int  @default(0)
-  llmCost   Decimal  @default(0) @db.Decimal(28, 8)
-  createdAt DateTime @default(now())
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@unique([agentId, date])
-  @@index([agentId])
-  @@index([date])
-}
-
-model Template {
-  id        String   @id @default(uuid())
-  name      String
-  persona   String?
-  imageUrl  String?
-  config    Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  agents Agent[]
-}
-
-model Market {
-  id                  String          @id @default(uuid())
-  name                String
-  creatorAddress      String
-  volume              Decimal         @default(0) @db.Decimal(28, 8)
-  context             String?
-  imageUrl            String?
-  outcomes            Json
-  outcomePositionIds Json?           // CTF position/token id per outcome (same length as outcomes)
-  sourceUrl           String?
-  resolutionDate      DateTime
-  oracleAddress       String
-  status              MarketStatus    @default(OPEN)
-  collateralToken     String
-  /** Set when market is on-chain; null for drafts (not yet created on-chain). */
-  conditionId         String?         @unique
-  /** On-chain questionId (keccak256(encodePacked(question, creator, oracle))). Null for drafts; set when on-chain. Markets without questionId are not listable. */
-  questionId          String?         @unique
-  /** Tx hash of create(Market) when created via CRE. Audit only. */
-  createMarketTxHash  String?
-  platform            MarketPlatform  @default(NATIVE)
-  /** Which AI agent created this market (e.g. gemini, grok). Internal only; not exposed on public API. */
-  agentSource         String?        // gemini | grok
-  /** Optional rules for agent settlement (benchmark for deliberation). Offchain only. */
-  settlementRules     String?        @db.Text
-  liquidity           Decimal?        @db.Decimal(28, 8)
-  confidence          Float?
-  pnl                 Decimal?       @db.Decimal(28, 8)
-  liquiditySeeded     Boolean        @default(false)
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
-  tradeReason         String         @default("No reason")
-
-  trades    Trade[]
-  positions Position[]
-  orders    Order[]
-  news      News[]
-  aiLogs    AiLog[]
-  agentReasons AgentReasoning[]
-  agentEnqueuedMarkets AgentEnqueuedMarket[]
-  pendingAgentTrades   PendingAgentTrade[]
-  settlementLogs      MarketSettlementLog[]
-
-  @@index([creatorAddress])
-  @@index([status])
-  @@index([conditionId])
-  @@index([questionId])
-  @@index([platform])
-}
-
-/// Log of agent settlement deliberation (e.g. dispute reasons when consensus is false).
-model MarketSettlementLog {
-  id           String   @id @default(uuid())
-  marketId     String
-  questionId   String   // onchain questionId (hex)
-  consensus    Boolean
-  outcomeArray Json?    // [1,0] etc when resolved
-  agentAReason String?  @db.Text
-  agentBReason String?  @db.Text
-  createdAt    DateTime @default(now())
-
-  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
-
-  @@index([marketId])
-  @@index([questionId])
-}
-
-model Position {
-  id                  String         @id @default(uuid())
-  marketId            String
-  userId              String?
-  agentId             String?
-  address             String
-  tokenAddress        String
-  outcomeIndex        Int
-  outcomeString       String?        @db.Text // Human-readable outcome (e.g. "Yes", "No")
-  side                PositionSide
-  status              PositionStatus @default(OPEN)
-  avgPrice            Decimal        @db.Decimal(28, 18)
-  collateralLocked    Decimal        @db.Decimal(28, 18)
-  isAmm               Boolean        @default(false)
-  contractPositionId  String?       // Position/token id from smart contract
-  /// "main" = live chain; "tenderly" = simulate. Null = main (backfill).
-  chainKey            String?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
-  tradeReason         String?       @db.Text // Agent's reasoning for this position
-  latestReason        String?       @db.Text // Latest reasoning from agent decisions
-
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  market Market  @relation(fields: [marketId], references: [id], onDelete: Cascade)
-
-  @@index([marketId])
-  @@index([userId])
-  @@index([agentId])
-  @@index([address])
-  @@index([chainKey])
-}
-
-model Trade {
-  id           String   @id @default(uuid())
-  marketId     String
-  outcomeIndex Int      @default(0)
-  userId       String?
-  agentId      String?
-  side         String
-  amount       Decimal  @db.Decimal(28, 18)
-  price        Decimal  @db.Decimal(28, 18)
-  txHash       String?
-  /// "main" = live chain; "tenderly" = simulate. Null = main (backfill).
-  chainKey     String?
-  createdAt    DateTime @default(now())
-
-  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
-
-  @@index([marketId])
-  @@index([marketId, outcomeIndex])
-  @@index([userId])
-  @@index([agentId])
-  @@index([chainKey])
-}
-
-model Order {
-  id           String   @id @default(uuid())
-  marketId     String
-  outcomeIndex Int      @default(0)
-  side         String
-  type         String   @default("LIMIT")
-  amount       Decimal  @db.Decimal(28, 18)
-  price        Decimal  @db.Decimal(28, 18)
-  status       String   @default("PENDING")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  userId       String?
-  agentId      String?
-  /// "main" = live chain; "tenderly" = simulate. Set for agent orders.
-  chainKey     String?
-  /// CRE execution: for user orders, EIP-712 quote params + userSignature so we can POST to CRE on fill.
-  crePayload   Json?
-
-  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
-
-  @@index([marketId])
-  @@index([marketId, outcomeIndex])
-  @@index([userId])
-  @@index([agentId])
-  @@index([chainKey])
-}
-
-model News {
-  id        String   @id @default(uuid())
-  marketId  String
-  title     String
-  body      String?
-  imageUrl  String?
-  sourceUrl String?
-  createdAt DateTime @default(now())
-
-  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
-
-  @@index([marketId])
-}
-
-/// Raw ingested items from RSS and CryptoPanic. Deduped by source + externalId.
-model FeedItem {
-  id          String    @id @default(uuid())
-  source      String    // RSS_COINDESK | RSS_COINTELEGRAPH | CRYPTOPANIC
-  externalId  String
-  title       String
-  body        String?
-  sourceUrl   String?
-  imageUrl    String?
-  publishedAt DateTime
-  metadata    Json?     // e.g. { currencies: ["BTC"], kind: "news" }
-  createdAt   DateTime @default(now())
-
-  @@unique([source, externalId])
-  @@index([source])
-  @@index([publishedAt])
-}
-
-model AiLog {
-  id        String   @id @default(uuid())
-  agentId   String
-  marketId  String?
-  action    String
-  payload   Json?
-  createdAt DateTime @default(now())
-
-  agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  market Market? @relation(fields: [marketId], references: [id], onDelete: SetNull)
-
-  @@index([agentId])
-  @@index([marketId])
-}
-
-model AgentReasoning {
-  id                String   @id @default(uuid())
-  agentId           String
-  marketId          String?
-  model             String
-  systemPrompt      String?  @db.Text
-  userContext       String   @db.Text
-  reasoning         String?  @db.Text
-  response          String   @db.Text
-  promptTokens      Int      @default(0)
-  completionTokens  Int      @default(0)
-  totalTokens       Int      @default(0)
-  estimatedCost     Decimal  @default(0) @db.Decimal(28, 8)
-  riskScore         Float?
-  actionTaken       String?
-  tradeReason       String
-  createdAt         DateTime @default(now())
-
-  agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  market Market? @relation(fields: [marketId], references: [id], onDelete: SetNull)
-
-  @@index([agentId])
-  @@index([marketId])
-  @@index([createdAt])
-}
-
-model AiRequest {
-  id        String   @id @default(uuid())
-  userId    String
-  prompt    String
-  response  String?
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-model Activity {
-  id        String   @id @default(uuid())
-  agentId   String
-  type      String
-  payload   Json?
-  createdAt DateTime @default(now())
-
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
-
-  @@index([agentId])
-}
-
-/// BYOA: unclaimed agent registration. After claim, links to User and Agent.
-model AgentRegistration {
-  id                  String    @id @default(uuid())
-  apiKeyHash          String    // SHA-256 of raw api_key
-  claimCode           String    @unique // short code for claim URL
-  name                String?   // optional display name
-  status              String    @default("UNCLAIMED") // UNCLAIMED | CLAIMED
-  claimedByUserId     String?
-  claimedAgentId      String?   @unique
-  walletAddress       String    // agent trading wallet (0x...)
-  encryptedPrivateKey String    // backend-generated, for signing
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-
-  claimedByUser User?  @relation(fields: [claimedByUserId], references: [id], onDelete: SetNull)
-  claimedAgent Agent? @relation(fields: [claimedAgentId], references: [id], onDelete: SetNull)
-
-  @@index([apiKeyHash])
-  @@index([claimCode])
-  @@index([status])
-}
-
-model Tool {
-  id               String   @id @default(uuid())
-  name             String
-  url              String
-  description      String
-  imageUrl         String?
-  fee              Decimal  @db.Decimal(28, 8)
-  receiverAddress  String
-  inputSchema      Json
-  outputSchema     Json
-  provider         String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
 }

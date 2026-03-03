@@ -12,12 +12,41 @@ import {
   type PositionQueryInput,
 } from "../schemas/position.schema.js";
 import { Prisma } from "@prisma/client";
+import { getPublicClient } from "../services/agent-onboarding.service.js";
+import contracts from "../lib/contracts.json" assert { type: "json" };
+import { Abi } from "thirdweb/utils";
+import { USDC_DECIMALS } from "../lib/eip712-quote.js";
 
-function serializePosition(position: Prisma.PositionGetPayload<{}>) {
+function serializePosition(position: Prisma.PositionGetPayload<{ include: { market: { select: { outcomes: true } } } }>) {
+  // Ensure outcomeString is populated from market outcomes if not already set
+  let outcomeString = position.outcomeString;
+  if (!outcomeString && position.market?.outcomes) {
+    const outcomes = position.market.outcomes as unknown[];
+    if (Array.isArray(outcomes) && position.outcomeIndex < outcomes.length) {
+      outcomeString = String(outcomes[position.outcomeIndex]);
+    }
+  }
+  
   return {
     ...position,
     avgPrice: position.avgPrice.toString(),
     collateralLocked: position.collateralLocked.toString(),
+    // Include new fields with fallbacks
+    outcomeString: outcomeString || undefined,
+    chainKey: position.chainKey || undefined,
+    tradeReason: position.tradeReason || undefined,
+  };
+}
+
+function serializePositionBasic(position: Prisma.PositionGetPayload<{}>) {
+  return {
+    ...position,
+    avgPrice: position.avgPrice.toString(),
+    collateralLocked: position.collateralLocked.toString(),
+    // Include new fields with fallbacks
+    outcomeString: position.outcomeString || undefined,
+    chainKey: position.chainKey || undefined,
+    tradeReason: position.tradeReason || undefined,
   };
 }
 
@@ -50,7 +79,16 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: { market: { select: { id: true, name: true, conditionId: true } } },
+        include: { 
+          market: { 
+            select: { 
+              id: true, 
+              name: true, 
+              conditionId: true,
+              outcomes: true  // Include outcomes array
+            } 
+          } 
+        },
       }),
       prisma.position.count({ where }),
     ]);
@@ -156,7 +194,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       marketId: position.marketId,
       reason: MARKET_UPDATE_REASON.POSITION,
     });
-    return reply.send({ ...serializePosition(position), market: position.market });
+    return reply.send(serializePositionBasic(position));
   });
 
   app.delete("/api/positions/:id", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
@@ -174,5 +212,47 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       });
     }
     return reply.code(204).send();
+  });
+
+  const ERC1155_ABI = {
+    "inputs": [
+      { "internalType": "address", "name": "account", "type": "address" },
+      { "internalType": "uint256", "name": "id", "type": "uint256" }
+    ],
+    "name": "balanceOf",
+    "outputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  } as const;
+
+  async function getChainPosition(positionId: string, address: string) {
+    const client = getPublicClient();
+    if (!client) return null;
+    const balance = await client.readContract({
+      address: contracts.contracts?.conditionalTokens as `0x${string}`,
+      abi: [ERC1155_ABI] as Abi,
+      functionName: "balanceOf",
+      args: [address, positionId],
+    });
+    return balance as any;
+  }
+  app.get("/api/positions/:marketId/:address", async (req: FastifyRequest<{ Params: { marketId: string; address: string } }>, reply: FastifyReply) => {
+    const prisma = getPrismaClient();
+    // const positions = await prisma.position.findMany({ where: { marketId: req.params.marketId }, include: { market: { select: { id: true, name: true } } } });
+    const markets = await prisma.market.findUnique({ where: { id: req.params.marketId }, include: { positions: true } });
+    const positions: Array<string> | null = markets?.outcomePositionIds as unknown as Array<string> | null;
+    const balances: string[] = [];
+    for (const position of positions ?? []) {
+      if (position) {
+        const balance = await getChainPosition(position, req.params.address);
+        console.log(balance);
+        // balances.set(position, balance ?? 0);
+        balances.push(balance.toString());
+      }
+    }
+
+    return reply.send({ balances });
   });
 }

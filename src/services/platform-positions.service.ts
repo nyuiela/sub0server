@@ -5,10 +5,11 @@
 
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
+import contracts from "../lib/contracts.json" assert { type: "json" };
 import { PositionSide, PositionStatus } from "@prisma/client";
 
 /** Position.collateralLocked is Decimal(28,18): max integer part < 10^10. Cap to avoid overflow. */
-const MAX_COLLATERAL_DECIMAL = "9999999999.999999999999999999";
+const MAX_COLLATERAL_DECIMAL = "9999999999";
 
 /**
  * Create one LONG position per outcome for the platform so it can sell to MARKET buyers.
@@ -29,7 +30,7 @@ export async function createPlatformPositionsForMarket(
   createdAt?: Date | null,
   updatedAt?: Date | null,
 ): Promise<void> {
-  const address = config.platformLiquidityAddress;
+  const address = contracts.contracts?.usdc;
   if (!address) return;
 
   const prisma = getPrismaClient();
