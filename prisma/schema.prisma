@@ -500,6 +500,7 @@ model AgentReasoning {
   estimatedCost     Decimal  @default(0) @db.Decimal(28, 8)
   riskScore         Float?
   actionTaken       String?
+  tradeReason       String
   createdAt         DateTime @default(now())
 
   agent  Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
