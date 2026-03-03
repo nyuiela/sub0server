@@ -112,6 +112,13 @@ async function getMarket(marketId: string): Promise<{ name?: string; outcomes?: 
   return data as { name?: string; outcomes?: unknown[] };
 }
 
+async function getAgentId(): Promise<string> {
+  const { status, data } = await fetchApi(`/api/agents`);
+  if (status !== 200) return "";
+  const agents = data as { id?: string }[];
+  return agents[0].id ?? "";
+}
+
 async function placeOrder(params: {
   marketId: string;
   outcomeIndex: number;

@@ -72,9 +72,9 @@ function hasCompleteWallet(
   const key = encryptedPrivateKey?.trim();
   return Boolean(
     addr &&
-      addr !== CRE_PENDING_PUBLIC_KEY &&
-      key &&
-      key !== CRE_PENDING_PRIVATE_KEY
+    addr !== CRE_PENDING_PUBLIC_KEY &&
+    key &&
+    key !== CRE_PENDING_PRIVATE_KEY
   );
 }
 
@@ -496,7 +496,7 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
       }),
       repo.count({ where: { agentId: req.params.id } }),
     ]);
-    type ReasonRow = { estimatedCost?: { toString(): string }; createdAt: Date; [k: string]: unknown };
+    type ReasonRow = { estimatedCost?: { toString(): string }; createdAt: Date;[k: string]: unknown };
     return reply.send({
       data: items.map((r: ReasonRow) => ({
         ...r,
