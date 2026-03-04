@@ -22,7 +22,6 @@ import type {
   AgentMarketSuggestion,
   CreCreateMarketPayload,
   CreDraftPayloadForCre,
-  AgentSource,
 } from "../types/agent-markets.js";
 import { Hex } from "thirdweb";
 import contracts from "../lib/contracts.json" assert { type: "json" };
@@ -311,8 +310,7 @@ function filterSuggestions(
 }
 
 function toCrePayload(
-  suggestion: AgentMarketSuggestion,
-  agentSource: AgentSource
+  suggestion: AgentMarketSuggestion
 ): CreCreateMarketPayload {
   const duration =
     suggestion.durationSeconds != null && suggestion.durationSeconds > 0
@@ -334,7 +332,6 @@ function toCrePayload(
     oracleType: ORACLE_TYPE_PLATFORM,
     marketType: MARKET_TYPE_PUBLIC,
     creatorAddress: config.platformCreatorAddress,
-    agentSource,
     amountUsdc: config.agentMarketAmountUsdc,
     context: suggestion.context,
   };
@@ -345,7 +342,7 @@ const MAX_MARKETS_PER_RUN = 50;
 
 /**
  * Generates agent market payloads from Gemini, Grok (XAI), and Open WebUI (when configured).
- * Count is per-agent: e.g. count=4 with 3 agents => 4+4+4 = 12 total markets in one batch to CRE.
+ * Count is total markets: e.g. count=1 => 1 total market from one agent.
  */
 export async function generateAgentMarkets(
   count: number
@@ -353,14 +350,24 @@ export async function generateAgentMarkets(
   if (count < 1) return [];
 
   const useOpenWebUi = Boolean(config.openWebUiBaseUrl);
-  const agents = useOpenWebUi ? 3 : 2;
-  const perAgentCount = Math.min(
-    count,
-    Math.max(1, Math.floor(MAX_MARKETS_PER_RUN / agents))
-  );
-  const geminiCount = perAgentCount;
-  const grokCount = perAgentCount;
-  const openWebUiCount = useOpenWebUi ? perAgentCount : 0;
+  
+  // For small counts, assign to agents sequentially to hit exact total
+  let geminiCount = 0, grokCount = 0, openWebUiCount = 0;
+  
+  if (count >= 1) geminiCount = 1;
+  if (count >= 2) grokCount = 1;
+  if (count >= 3 && useOpenWebUi) openWebUiCount = 1;
+  
+  // For larger counts, distribute evenly
+  if (count > 3) {
+    const agents = useOpenWebUi ? 3 : 2;
+    const perAgent = Math.floor(count / agents);
+    const remaining = count % agents;
+    
+    geminiCount = perAgent + (remaining > 0 ? 1 : 0);
+    grokCount = perAgent + (remaining > 1 ? 1 : 0);
+    openWebUiCount = useOpenWebUi ? perAgent : 0;
+  }
 
   const safeCallGemini = (): Promise<AgentMarketSuggestion[]> =>
     callGemini(geminiCount).catch((err: unknown) => {
@@ -398,9 +405,9 @@ export async function generateAgentMarkets(
   );
 
   return [
-    ...geminiFiltered.map((s) => toCrePayload(s, "gemini")),
-    ...grokFiltered.map((s) => toCrePayload(s, "grok")),
-    ...openWebUiFiltered.map((s) => toCrePayload(s, "openwebui")),
+    ...geminiFiltered.map((s) => toCrePayload(s)),
+    ...grokFiltered.map((s) => toCrePayload(s)),
+    ...openWebUiFiltered.map((s) => toCrePayload(s)),
   ];
 }
 
@@ -485,7 +492,6 @@ export async function createDraftMarketsFromAgents(
         outcomes,
         collateralToken,
         platform: "NATIVE",
-        agentSource: p.agentSource ?? null,
         volume: 0,
         conditionId: qid, // Set conditionId to questionId as well
         questionId: qid, // Set questionId to computed questionId

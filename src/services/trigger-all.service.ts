@@ -51,7 +51,7 @@ export async function runTriggerAll(log?: FastifyBaseLogger): Promise<TriggerAll
           await prisma.agentEnqueuedMarket.update({ where: { id: row.id }, data: { chainKey: CHAIN_KEY_MAIN } });
         } else {
           await prisma.agentEnqueuedMarket.create({
-            data: { agentId: agent.id, marketId, simulationId: null, chainKey: CHAIN_KEY_MAIN },
+            data: { agentId: agent.id, marketId, simulationId: null, chainKey: CHAIN_KEY_MAIN, tradeReason: "Auto-enqueued by trigger-all" },
           });
         }
         existingSet.add(marketId);

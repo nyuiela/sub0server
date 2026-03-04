@@ -170,10 +170,14 @@ async function createMarketFromOnchainResult(
     }
   }
 
+  const questionIdHex = (body.questionId.startsWith("0x")
+    ? body.questionId
+    : `0x${body.questionId}`) as Hex;
+
   if (!chainMarket) {
     throw new Error(
       `Market not found on chain after ${GET_MARKET_RETRIES} retries. ` +
-      `Question ID: ${questionId}. ` +
+      `Question ID: ${questionIdHex}. ` +
       `This usually means the market needs more time to be indexed. ` +
       `Try again in a few seconds or check if the transaction is still pending.`
     );
@@ -208,9 +212,6 @@ async function createMarketFromOnchainResult(
       ? ["Yes", "No"]
       : Array.from({ length: outcomeCount }, (_, i) => `Outcome ${i + 1}`);
 
-  const questionIdHex = (body.questionId.startsWith("0x")
-    ? body.questionId
-    : `0x${body.questionId}`) as Hex;
   const seeded = await seedMarketLiquidityOnChain(questionIdHex, config.platformSeedAmountUsdcRaw);
   // const initialVolume = seeded ? rawUsdcToDecimalString(BigInt(contracts.platform?.initialLiquidityPerOutcome ?? "0")) : "0";
   const initialLiquidity = seeded ? contracts.platform?.initialLiquidityPerOutcome : "0";
@@ -229,7 +230,6 @@ async function createMarketFromOnchainResult(
       questionId: body.questionId,
       createMarketTxHash: body.createMarketTxHash,
       platform: "NATIVE",
-      agentSource: body.agentSource ?? null,
       volume: initialLiquidity,
       liquidity: initialLiquidity,
       liquiditySeeded: seeded,

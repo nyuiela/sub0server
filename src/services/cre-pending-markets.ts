@@ -37,7 +37,6 @@ interface PendingItem {
   outcomeSlotCount: number;
   oracleType: number;
   marketType: number;
-  agentSource?: string;
   sentAt: number;
   /** When set, poll will update this draft market instead of creating new. */
   marketId?: string;
@@ -103,7 +102,6 @@ export function addPending(
       outcomeSlotCount: p.outcomeSlotCount,
       oracleType: p.oracleType,
       marketType: p.marketType,
-      agentSource: "agentSource" in p ? p.agentSource : undefined,
       sentAt: now,
       marketId: "marketId" in p ? p.marketId : undefined,
     });
@@ -272,7 +270,6 @@ async function persistMarketFromChain(
       conditionId,
       questionId: item.questionId,
       platform: "NATIVE",
-      agentSource: item.agentSource ?? null,
     },
   });
 

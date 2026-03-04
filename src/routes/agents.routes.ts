@@ -237,7 +237,62 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(payload);
   });
 
-  /** GET /api/agents/:id/enqueued-markets - List enqueued markets with status and market name. Main: simulationId null. Simulate: pass simulationId to get that run's list. */
+  /** GET /api/agents/:id/reasoning - List AI reasoning logs for an agent (for debugging and detailed analysis). */
+app.get(
+  "/api/agents/:id/reasoning",
+  async (
+    req: FastifyRequest<{
+      Params: { id: string };
+      Querystring: { limit?: string; offset?: string; marketId?: string };
+    }>,
+    reply
+  ) => {
+    const { id: agentId } = req.params;
+    const { limit = "20", offset = "0", marketId } = req.query;
+    const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100);
+    const offsetNum = Math.max(parseInt(offset) || 0, 0);
+    
+    const prisma = getPrismaClient();
+    const where = { 
+      agentId,
+      ...(marketId && { marketId })
+    };
+    
+    const [rows, total] = await Promise.all([
+      prisma.agentReasoning.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limitNum,
+        skip: offsetNum,
+        include: { 
+          market: { select: { name: true } },
+          agent: { select: { name: true } }
+        },
+      }),
+      prisma.agentReasoning.count({ where }),
+    ]);
+    
+    const data = rows.map((r) => ({
+      id: r.id,
+      agentId: r.agentId,
+      agentName: r.agent?.name,
+      marketId: r.marketId,
+      marketName: r.market?.name,
+      model: r.model,
+      reasoning: r.reasoning,
+      response: r.response,
+      actionTaken: r.actionTaken,
+      tradeReason: r.tradeReason,
+      promptTokens: r.promptTokens,
+      completionTokens: r.completionTokens,
+      totalTokens: r.totalTokens,
+      estimatedCost: r.estimatedCost?.toString(),
+      createdAt: r.createdAt.toISOString(),
+    }));
+    
+    return reply.send({ data, total, limit: limitNum, offset: offsetNum });
+  }
+);
   app.get(
     "/api/agents/:id/enqueued-markets",
     async (
@@ -478,34 +533,6 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
           createdAt: row.createdAt.toISOString(),
         };
       }),
-    });
-  });
-
-  app.get("/api/agents/:id/reasoning", async (req: FastifyRequest<{ Params: { id: string }; Querystring: { limit?: string; offset?: string } }>, reply: FastifyReply) => {
-    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
-    const limit = Math.min(Math.max(1, Number(req.query.limit) || 20), 100);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
-    const prisma = getPrismaClient();
-    const repo = (prisma as unknown as { agentReasoning: { findMany: typeof prisma.agentTrack.findMany; count: typeof prisma.agentTrack.count } }).agentReasoning;
-    const [items, total] = await Promise.all([
-      repo.findMany({
-        where: { agentId: req.params.id },
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      repo.count({ where: { agentId: req.params.id } }),
-    ]);
-    type ReasonRow = { estimatedCost?: { toString(): string }; createdAt: Date;[k: string]: unknown };
-    return reply.send({
-      data: items.map((r: ReasonRow) => ({
-        ...r,
-        estimatedCost: r.estimatedCost?.toString() ?? "0",
-        createdAt: r.createdAt.toISOString(),
-      })),
-      total,
-      limit,
-      offset,
     });
   });
 
