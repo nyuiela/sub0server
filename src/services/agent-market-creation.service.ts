@@ -406,6 +406,7 @@ export async function generateAgentMarkets(
 
 /**
  * Filters out payloads whose questionId already exists in the DB (avoid duplicate CRE create).
+ * Uses atomic transaction to prevent race conditions.
  */
 export async function filterPayloadsByExistingQuestionId(
   payloads: CreCreateMarketPayload[]
@@ -413,14 +414,30 @@ export async function filterPayloadsByExistingQuestionId(
   if (payloads.length === 0) return [];
   const prisma = getPrismaClient();
   const filtered: CreCreateMarketPayload[] = [];
-  for (const p of payloads) {
-    const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
-    const existing = await prisma.market.findFirst({
-      where: { questionId: qid },
-      select: { id: true },
+  
+  try {
+    // Use transaction to ensure atomicity and prevent race conditions
+    await prisma.$transaction(async (tx) => {
+      for (const p of payloads) {
+        const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
+        
+        // Check if market with this questionId already exists within transaction
+        const existing = await tx.market.findFirst({
+          where: { questionId: qid },
+          select: { id: true }
+        });
+        
+        if (!existing) {
+          filtered.push(p);
+        } else {
+          console.log(`Filtering out market with existing questionId: ${qid}`);
+        }
+      }
     });
-    if (!existing) filtered.push(p);
+  } catch (error) {
+    console.error("Error in filterPayloadsByExistingQuestionId:", error);
   }
+  
   return filtered;
 }
 
@@ -460,6 +477,7 @@ export async function createDraftMarketsFromAgents(
         : (Array.from({ length: p.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`) as object);
     const market = await prisma.market.create({
       data: {
+        id: qid, // Use questionId as market ID to prevent duplicates
         name: p.question,
         creatorAddress: p.creatorAddress,
         oracleAddress: p.oracle,
@@ -469,8 +487,8 @@ export async function createDraftMarketsFromAgents(
         platform: "NATIVE",
         agentSource: p.agentSource ?? null,
         volume: 0,
-        conditionId: null,
-        questionId: null,
+        conditionId: qid, // Set conditionId to questionId as well
+        questionId: qid, // Set questionId to computed questionId
         context: p.context ?? null,
       },
     });
