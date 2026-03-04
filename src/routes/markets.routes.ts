@@ -21,6 +21,8 @@ import {
 import { getMarketHolders, getMarketTraders } from "../services/activities.service.js";
 import { createPlatformPositionsForMarket } from "../services/platform-positions.service.js";
 import { getMarketPrices, getMarketQuote } from "../services/lmsr-prices.service.js";
+import { requestLmsrPricingFromCre, type CreLmsrPricingRequest } from "../services/cre-lmsr-pricing.service.js";
+import { z } from "zod";
 import {
   marketPricesQuerySchema,
   marketQuoteQuerySchema,
@@ -236,6 +238,200 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
       const prices = await getMarketPrices(req.params.id, parsed.data.quantity);
       if (!prices) return reply.code(404).send({ error: "Market not found" });
       return reply.send(prices);
+    }
+  );
+
+  // POST /api/markets/:id/pricing - Request LMSR pricing from CRE
+  app.post(
+    "/api/markets/:id/pricing",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Body: unknown;
+      }>,
+      reply: FastifyReply
+    ) => {
+      // Validate request body with Zod
+      const pricingSchema = z.object({
+        outcomeIndex: z.number().int().min(0).max(255),
+        quantity: z.string().min(1),
+        bParameter: z.string().min(1).optional(),
+      });
+
+      const parsed = pricingSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten()
+        });
+      }
+
+      const { outcomeIndex, quantity, bParameter } = parsed.data;
+
+      // Get market info
+      const prisma = getPrismaClient();
+      const market = await prisma.market.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          questionId: true,
+          outcomes: true,
+          liquidity: true,
+        },
+      });
+
+      if (!market) {
+        return reply.code(404).send({ error: "Market not found" });
+      }
+
+      // Validate outcome index
+      const outcomes = market.outcomes as unknown[];
+      const outcomeCount = Array.isArray(outcomes) ? outcomes.length : 2;
+      if (outcomeIndex >= outcomeCount) {
+        return reply.code(400).send({
+          error: "Invalid outcome index",
+          message: `Market has ${outcomeCount} outcomes (0-${outcomeCount - 1})`
+        });
+      }
+
+      // Generate unique request ID
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Get user info if authenticated
+      const user = req.auth?.type === "user" ? req.auth : null;
+
+      // Build pricing request
+      const pricingRequest: CreLmsrPricingRequest = {
+        marketId: market.id,
+        questionId: market.questionId || market.id, // Use questionId if available, fallback to marketId
+        outcomeIndex,
+        quantity,
+        bParameter: bParameter || market.liquidity?.toString() || "1000000",
+        userId: user?.userId || user?.address,
+        requestId,
+      };
+
+      // Request pricing from CRE
+      const result = await requestLmsrPricingFromCre(pricingRequest);
+
+      if (!result.success) {
+        return reply.code(500).send({
+          error: "Pricing request failed",
+          details: result.error,
+          requestId,
+        });
+      }
+
+      return reply.send({
+        success: true,
+        requestId,
+        message: "Pricing request submitted. Result will be broadcast via WebSocket.",
+      });
+    }
+  );
+
+  // GET /api/markets/:id/pricing - Request LMSR pricing via query params
+  app.get(
+    "/api/markets/:id/pricing",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: {
+          outcomeIndex?: string;
+          quantity?: string;
+          bParameter?: string;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      // Validate query parameters
+      const pricingQuerySchema = z.object({
+        outcomeIndex: z.string().transform(Number).pipe(z.number().int().min(0).max(255)),
+        quantity: z.string().min(1),
+        bParameter: z.string().min(1).optional(),
+      });
+
+      const parsed = pricingQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "Validation failed",
+          details: parsed.error.flatten(),
+          message: "Required: outcomeIndex (0-255), quantity (string). Optional: bParameter"
+        });
+      }
+
+      const { outcomeIndex, quantity, bParameter } = parsed.data;
+
+      // Get market info
+      const prisma = getPrismaClient();
+      const market = await prisma.market.findUnique({
+        where: { id: req.params.id },
+        select: {
+          id: true,
+          questionId: true,
+          outcomes: true,
+          liquidity: true,
+        },
+      });
+
+      if (!market) {
+        return reply.code(404).send({ error: "Market not found" });
+      }
+
+      // Validate outcome index
+      const outcomes = market.outcomes as unknown[];
+      const outcomeCount = Array.isArray(outcomes) ? outcomes.length : 2;
+      if (outcomeIndex >= outcomeCount) {
+        return reply.code(400).send({
+          error: "Invalid outcome index",
+          message: `Market has ${outcomeCount} outcomes (0-${outcomeCount - 1})`
+        });
+      }
+
+      // Generate unique request ID
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Get user info if authenticated
+      const user = req.auth?.type === "user" ? req.auth : null;
+
+      // Build pricing request
+      const pricingRequest: CreLmsrPricingRequest = {
+        marketId: market.id,
+        questionId: market.questionId || market.id, // Use questionId if available, fallback to marketId
+        outcomeIndex,
+        quantity,
+        bParameter: bParameter || market.liquidity?.toString() || "1000000",
+        userId: user?.userId || user?.address,
+        requestId,
+      };
+
+      // Request pricing from CRE
+      const result = await requestLmsrPricingFromCre(pricingRequest);
+
+      if (!result.success) {
+        return reply.code(500).send({
+          error: "Pricing request failed",
+          details: result.error,
+          requestId,
+        });
+      }
+
+      return reply.send({
+        success: true,
+        requestId,
+        message: "Pricing request submitted. Result will be broadcast via WebSocket.",
+        websocket: {
+          event: "LMSR_PRICING_UPDATE",
+          room: `market:${market.id}`,
+          subscribe: {
+            type: "SUBSCRIBE",
+            payload: {
+              room: `market:${market.id}`,
+              filters: { eventTypes: ["LMSR_PRICING_UPDATE"] }
+            }
+          }
+        }
+      });
     }
   );
 

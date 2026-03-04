@@ -26,3 +26,40 @@ export interface LMSRQuote {
   nonce: string;
   deadline: number;
 }
+
+/**
+ * Payload sent to CRE for LMSR pricing request
+ */
+export interface LMSRPricingPayload {
+  action: "lmsrPricing";
+  apiKey: string;
+  marketId: string;
+  outcomeIndex: number;
+  quantity: string;
+  bParameter: string;
+  metadata?: {
+    backendMarketId?: string;
+    userId?: string;
+    agentId?: string;
+    requestId?: string;
+  };
+}
+
+/**
+ * Result returned from CRE LMSR pricing callback
+ */
+export interface LMSRPricingResult {
+  marketId: string;
+  deadline: string;
+  donSignature: string;
+  nonce: string;
+  tradeCostUsdc: string;
+  requestId: string;
+  outcomeIndex?: number;
+  quantity?: string;
+  metadata?: {
+    backendMarketId?: string;
+    userId?: string;
+    agentId?: string;
+  };
+}

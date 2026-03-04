@@ -21,6 +21,9 @@ export const WS_EVENT_NAMES = {
   AGENT_UPDATED: "AGENT_UPDATED",
   AGENT_MARKET_ACTION: "AGENT_MARKET_ACTION",
 
+  // Pricing events
+  LMSR_PRICING_UPDATE: "LMSR_PRICING_UPDATE",
+
   // Control events
   SUBSCRIBE: "SUBSCRIBE",
   UNSUBSCRIBE: "UNSUBSCRIBE",
@@ -149,6 +152,20 @@ export interface AgentMarketActionPayload {
   };
 }
 
+/** LMSR pricing update - real-time pricing from CRE */
+export interface LMSRPricingUpdatePayload {
+  marketId: string;
+  questionId: string;
+  outcomeIndex: number;
+  quantity: string;
+  tradeCostUsdc: string;
+  deadline: string;
+  nonce: string;
+  donSignature: string;
+  requestId: string;
+  timestamp: string;
+}
+
 /** Order book snapshot from matching engine (ORDER_BOOK_UPDATE). One per outcome (e.g. Yes=0, No=1). */
 export interface OrderBookUpdatePayload {
   marketId: string;
@@ -206,6 +223,7 @@ export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.AI_ANALYSIS_UPDATE]: AIAnalysisUpdatePayload;
   [WS_EVENT_NAMES.AGENT_UPDATED]: AgentUpdatedPayload;
   [WS_EVENT_NAMES.AGENT_MARKET_ACTION]: AgentMarketActionPayload;
+  [WS_EVENT_NAMES.LMSR_PRICING_UPDATE]: LMSRPricingUpdatePayload;
   [WS_EVENT_NAMES.SUBSCRIBE]: SubscribePayload;
   [WS_EVENT_NAMES.UNSUBSCRIBE]: UnsubscribePayload;
   [WS_EVENT_NAMES.PING]: undefined;

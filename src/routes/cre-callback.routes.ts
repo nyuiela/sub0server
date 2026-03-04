@@ -14,9 +14,12 @@ import { executeAgentOnboarding } from "../services/agent-onboarding.service.js"
 import {
   creCreateWalletResultSchema,
   creAgentKeysSchema,
+  creLmsrPricingResultSchema,
   type CreCreateWalletResultInput,
   type CreAgentKeysInput,
+  type CreLmsrPricingResultInput,
 } from "../schemas/cre-callback.schema.js";
+import { handleCreLmsrPricingCallback } from "../services/cre-lmsr-pricing.service.js";
 
 export async function registerCreCallbackRoutes(app: FastifyInstance): Promise<void> {
   /** POST /api/internal/cre/create-wallet-result – store agent wallet address and optional CRE-only encrypted key. */
@@ -136,6 +139,44 @@ export async function registerCreCallbackRoutes(app: FastifyInstance): Promise<v
         });
         req.log.info({ agentId, walletAddress: address }, "CRE agent-keys: agent stored (background)");
       })();
+    }
+  );
+
+  /** POST /api/cre/lmsr-pricing – CRE sends LMSR pricing result after computing quote */
+  app.post<{ Body: unknown }>(
+    "/api/cre/lmsr-pricing",
+    async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+      // Parse and validate the incoming pricing result
+      const parsed = creLmsrPricingResultSchema.safeParse(req.body);
+      if (!parsed.success) {
+        req.log.warn({ validationError: parsed.error.flatten() }, "CRE lmsr-pricing: validation failed");
+        return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
+      }
+
+      const data = parsed.data as CreLmsrPricingResultInput;
+      req.log.info(
+        { marketId: data.marketId, requestId: data.requestId, tradeCostUsdc: data.tradeCostUsdc },
+        "CRE lmsr-pricing: received pricing result"
+      );
+
+      // Handle the pricing callback - broadcasts via WebSocket
+      await handleCreLmsrPricingCallback({
+        marketId: data.marketId,
+        deadline: data.deadline,
+        donSignature: data.donSignature,
+        nonce: data.nonce,
+        tradeCostUsdc: data.tradeCostUsdc,
+        requestId: data.requestId,
+        outcomeIndex: data.outcomeIndex,
+        quantity: data.quantity,
+        metadata: data.metadata,
+      });
+
+      return reply.code(200).send({
+        success: true,
+        requestId: data.requestId,
+        message: "Pricing result processed and broadcast",
+      });
     }
   );
 }

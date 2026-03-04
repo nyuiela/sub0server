@@ -24,3 +24,22 @@ export const creAgentKeysSchema = z.object({
 });
 
 export type CreAgentKeysInput = z.infer<typeof creAgentKeysSchema>;
+
+/** POST /api/cre/lmsr-pricing – CRE sends LMSR pricing result after computing quote */
+export const creLmsrPricingResultSchema = z.object({
+  marketId: z.string().min(1),
+  deadline: z.string().min(1),
+  donSignature: z.string().min(1).refine((s) => s.startsWith("0x"), "Signature must be 0x-prefixed"),
+  nonce: z.string().min(1),
+  tradeCostUsdc: z.string().min(1),
+  requestId: z.string().min(1),
+  outcomeIndex: z.number().optional(),
+  quantity: z.string().optional(),
+  metadata: z.object({
+    backendMarketId: z.string().optional(),
+    userId: z.string().optional(),
+    agentId: z.string().optional(),
+  }).optional(),
+});
+
+export type CreLmsrPricingResultInput = z.infer<typeof creLmsrPricingResultSchema>;

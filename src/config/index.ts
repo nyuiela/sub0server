@@ -356,6 +356,7 @@ export const REDIS_CHANNELS = {
   USER_ASSET_CHANGES: "user_asset_changes",
   AI_ANALYSIS: "ai_analysis",
   AGENT_MARKET_ACTIONS: "agent_market_actions",
+  LMSR_PRICING: "lmsr_pricing",
 } as const;
 
 export const HEARTBEAT_INTERVAL_MS = 30_000;

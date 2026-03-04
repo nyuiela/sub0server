@@ -18,6 +18,7 @@ import type {
   UserAssetChangedPayload,
   AIAnalysisUpdatePayload,
   AgentMarketActionPayload,
+  LMSRPricingUpdatePayload,
 } from "../types/websocket-events.js";
 import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.js";
 
@@ -76,7 +77,8 @@ export class SocketManager {
       REDIS_CHANNELS.POSITION_UPDATES,
       REDIS_CHANNELS.USER_ASSET_CHANGES,
       REDIS_CHANNELS.AI_ANALYSIS,
-      REDIS_CHANNELS.AGENT_MARKET_ACTIONS
+      REDIS_CHANNELS.AGENT_MARKET_ACTIONS,
+      REDIS_CHANNELS.LMSR_PRICING
     );
     sub.on("message", (channel: string, message: string) => {
       try {
@@ -248,6 +250,29 @@ export class SocketManager {
           this.broadcastToLocalRoom(`${ROOM_PREFIX}${action.marketId}:agent:${action.agentId}`, msg);
           // Broadcast to global agent room
           this.broadcastToLocalRoom(`agent:${action.agentId}`, msg);
+          return;
+        }
+        if (channel === REDIS_CHANNELS.LMSR_PRICING) {
+          const { payload, userId, agentId } = JSON.parse(message) as {
+            type: string;
+            payload: LMSRPricingUpdatePayload;
+            userId?: string;
+            agentId?: string;
+          };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.LMSR_PRICING_UPDATE,
+            payload,
+          };
+          // Broadcast to main market room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${payload.marketId}`, msg);
+          // If user-specific, also broadcast to user-scoped room
+          if (userId) {
+            this.broadcastToLocalRoom(`${ROOM_PREFIX}${payload.marketId}:user:${userId}`, msg);
+          }
+          // If agent-specific, also broadcast to agent-scoped room
+          if (agentId) {
+            this.broadcastToLocalRoom(`${ROOM_PREFIX}${payload.marketId}:agent:${agentId}`, msg);
+          }
           return;
         }
       } catch {
