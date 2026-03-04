@@ -13,6 +13,11 @@ import type {
   OrderBookUpdatePayload,
   MarketUpdatedPayload,
   AgentUpdatedPayload,
+  ActivityLogPayload,
+  PositionUpdatedPayload,
+  UserAssetChangedPayload,
+  AIAnalysisUpdatePayload,
+  AgentMarketActionPayload,
 } from "../types/websocket-events.js";
 import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.js";
 
@@ -23,10 +28,22 @@ interface SocketMeta {
   heartbeatTimer: ReturnType<typeof setInterval> | null;
 }
 
+interface RoomFilters {
+  eventTypes?: WsEventName[];
+  userScoped?: boolean;
+  agentId?: string;
+}
+
+interface RoomSubscription {
+  room: string;
+  filters?: RoomFilters;
+}
+
 export class SocketManager {
   private static instance: SocketManager | null = null;
   private readonly rooms = new Map<string, Set<WebSocket>>();
   private readonly socketToRooms = new Map<WebSocket, Set<string>>();
+  private readonly roomFilters = new Map<WebSocket, Map<string, RoomFilters>>();
   private readonly socketMeta = new Map<WebSocket, SocketMeta>();
   private readonly socketUserId = new Map<WebSocket, string | null>();
   private redisSub: Awaited<ReturnType<typeof getRedisSubscriber>> | null = null;
@@ -53,16 +70,23 @@ export class SocketManager {
       REDIS_CHANNELS.ORDER_BOOK_UPDATE,
       REDIS_CHANNELS.TRADES,
       REDIS_CHANNELS.MARKET_UPDATES,
-      REDIS_CHANNELS.AGENT_UPDATES
+      REDIS_CHANNELS.AGENT_UPDATES,
+      // New enhanced channels
+      REDIS_CHANNELS.ACTIVITY_LOG,
+      REDIS_CHANNELS.POSITION_UPDATES,
+      REDIS_CHANNELS.USER_ASSET_CHANGES,
+      REDIS_CHANNELS.AI_ANALYSIS,
+      REDIS_CHANNELS.AGENT_MARKET_ACTIONS
     );
     sub.on("message", (channel: string, message: string) => {
       try {
         if (channel === BROADCAST_CHANNEL) {
-          const { room, payload } = JSON.parse(message) as {
+          const { room, payload, filters } = JSON.parse(message) as {
             room: string;
             payload: WsMessage<WsEventName>;
+            filters?: RoomFilters;
           };
-          this.broadcastToLocalRoom(room, payload);
+          this.broadcastToLocalRoom(room, payload, filters);
           return;
         }
         if (channel === REDIS_CHANNELS.ORDER_BOOK_UPDATE) {
@@ -103,20 +127,28 @@ export class SocketManager {
             marketId: string;
             reason?: string;
             volume?: string;
+            liquidity?: string;
+            probability?: number;
+            status?: string;
           };
           const reason = raw.reason ?? (raw.volume != null ? "stats" : undefined);
           const payload: MarketUpdatedPayload = {
             marketId: raw.marketId,
             reason:
               reason === "created" ||
-              reason === "updated" ||
-              reason === "deleted" ||
-              reason === "stats" ||
-              reason === "position" ||
-              reason === "orderbook"
+                reason === "updated" ||
+                reason === "deleted" ||
+                reason === "stats" ||
+                reason === "position" ||
+                reason === "orderbook" ||
+                reason === "liquidity" ||
+                reason === "resolved"
                 ? reason
                 : undefined,
             volume: raw.volume,
+            liquidity: raw.liquidity,
+            probability: raw.probability,
+            status: raw.status,
           };
           const msg: WsMessage<WsEventName> = {
             type: WS_EVENT_NAMES.MARKET_UPDATED,
@@ -130,17 +162,93 @@ export class SocketManager {
           return;
         }
         if (channel === REDIS_CHANNELS.AGENT_UPDATES) {
-          const raw = JSON.parse(message) as { agentId: string; balance?: string; reason?: string };
+          const raw = JSON.parse(message) as { agentId: string; marketId?: string; balance?: string; pnl?: string; activePositions?: number; reason?: string };
           const payload: AgentUpdatedPayload = {
             agentId: raw.agentId,
+            marketId: raw.marketId,
             balance: raw.balance,
-            reason: raw.reason === "balance" ? "balance" : undefined,
+            pnl: raw.pnl,
+            activePositions: raw.activePositions,
+            reason: raw.reason === "balance" || raw.reason === "position" || raw.reason === "market_action" || raw.reason === "sync" ? raw.reason : undefined,
           };
           const msg: WsMessage<WsEventName> = {
             type: WS_EVENT_NAMES.AGENT_UPDATED,
             payload,
           };
+          // Broadcast to global agent room
           this.broadcastToLocalRoom(`agent:${raw.agentId}`, msg);
+          // Also broadcast to market-specific agent room if marketId is present
+          if (raw.marketId) {
+            this.broadcastToLocalRoom(`${ROOM_PREFIX}${raw.marketId}:agent:${raw.agentId}`, msg);
+          }
+          return;
+        }
+        // Enhanced channels
+        if (channel === REDIS_CHANNELS.ACTIVITY_LOG) {
+          const { activity, room } = JSON.parse(message) as { activity: ActivityLogPayload; room?: string };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.ACTIVITY_LOG,
+            payload: activity,
+          };
+          const targetRoom = room ?? `${ROOM_PREFIX}${activity.marketId}:activity`;
+          this.broadcastToLocalRoom(targetRoom, msg);
+          // Also broadcast to main market room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${activity.marketId}`, msg);
+          return;
+        }
+        if (channel === REDIS_CHANNELS.POSITION_UPDATES) {
+          const { position } = JSON.parse(message) as { position: PositionUpdatedPayload };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.POSITION_UPDATED,
+            payload: position,
+          };
+          // Broadcast to market room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${position.marketId}`, msg);
+          // Broadcast to user-scoped room if userId present
+          if (position.userId) {
+            this.broadcastToLocalRoom(`${ROOM_PREFIX}${position.marketId}:user:${position.userId}`, msg);
+          }
+          // Broadcast to agent-scoped room if agentId present
+          if (position.agentId) {
+            this.broadcastToLocalRoom(`${ROOM_PREFIX}${position.marketId}:agent:${position.agentId}`, msg);
+          }
+          return;
+        }
+        if (channel === REDIS_CHANNELS.USER_ASSET_CHANGES) {
+          const { asset } = JSON.parse(message) as { asset: UserAssetChangedPayload };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.USER_ASSET_CHANGED,
+            payload: asset,
+          };
+          // Only broadcast to user-scoped room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${asset.marketId}:user:${asset.userId}`, msg);
+          return;
+        }
+        if (channel === REDIS_CHANNELS.AI_ANALYSIS) {
+          const { analysis } = JSON.parse(message) as { analysis: AIAnalysisUpdatePayload };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.AI_ANALYSIS_UPDATE,
+            payload: analysis,
+          };
+          // Broadcast to AI-specific room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${analysis.marketId}:ai`, msg);
+          // Also broadcast to main market room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${analysis.marketId}`, msg);
+          return;
+        }
+        if (channel === REDIS_CHANNELS.AGENT_MARKET_ACTIONS) {
+          const { action } = JSON.parse(message) as { action: AgentMarketActionPayload };
+          const msg: WsMessage<WsEventName> = {
+            type: WS_EVENT_NAMES.AGENT_MARKET_ACTION,
+            payload: action,
+          };
+          // Broadcast to market room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${action.marketId}`, msg);
+          // Broadcast to agent-scoped room
+          this.broadcastToLocalRoom(`${ROOM_PREFIX}${action.marketId}:agent:${action.agentId}`, msg);
+          // Broadcast to global agent room
+          this.broadcastToLocalRoom(`agent:${action.agentId}`, msg);
+          return;
         }
       } catch {
         // ignore malformed
@@ -238,7 +346,7 @@ export class SocketManager {
     }
   }
 
-  subscribe(socket: WebSocket, room: string): void {
+  subscribe(socket: WebSocket, room: string, filters?: RoomFilters): void {
     let set = this.rooms.get(room);
     if (set === undefined) {
       set = new Set();
@@ -246,11 +354,22 @@ export class SocketManager {
     }
     set.add(socket);
     this.socketToRooms.get(socket)?.add(room);
+    // Store filters if provided
+    if (filters) {
+      let socketFilters = this.roomFilters.get(socket);
+      if (!socketFilters) {
+        socketFilters = new Map();
+        this.roomFilters.set(socket, socketFilters);
+      }
+      socketFilters.set(room, filters);
+    }
   }
 
   unsubscribe(socket: WebSocket, room: string): void {
     this.rooms.get(room)?.delete(socket);
     this.socketToRooms.get(socket)?.delete(room);
+    // Remove filters for this room
+    this.roomFilters.get(socket)?.delete(room);
   }
 
   removeSocket(socket: WebSocket): void {
@@ -261,6 +380,7 @@ export class SocketManager {
     this.socketToRooms.delete(socket);
     this.socketMeta.delete(socket);
     this.socketUserId.delete(socket);
+    this.roomFilters.delete(socket);
   }
 
   send<E extends WsEventName>(socket: WebSocket, message: WsMessage<E>): void {
@@ -275,21 +395,30 @@ export class SocketManager {
     });
   }
 
-  private broadcastToLocalRoom(room: string, message: WsMessage<WsEventName>): void {
+  private broadcastToLocalRoom(room: string, message: WsMessage<WsEventName>, filters?: RoomFilters): void {
     const set = this.rooms.get(room);
     if (!set) return;
     const payload = JSON.stringify(message);
     for (const ws of set) {
-      if (ws.readyState === 1) ws.send(payload);
+      if (ws.readyState !== 1) continue;
+      // Check socket-specific filters if they exist
+      const socketFilters = this.roomFilters.get(ws)?.get(room);
+      if (socketFilters) {
+        // Filter by event type if specified
+        if (socketFilters.eventTypes && !socketFilters.eventTypes.includes(message.type)) {
+          continue;
+        }
+      }
+      ws.send(payload);
     }
   }
 
-  async broadcastToRoom(room: string, message: WsMessage<WsEventName>): Promise<void> {
-    this.broadcastToLocalRoom(room, message);
+  async broadcastToRoom(room: string, message: WsMessage<WsEventName>, filters?: RoomFilters): Promise<void> {
+    this.broadcastToLocalRoom(room, message, filters);
     const pub = await getRedisPublisher();
     await pub.publish(
       BROADCAST_CHANNEL,
-      JSON.stringify({ room, payload: message })
+      JSON.stringify({ room, payload: message, filters })
     );
   }
 }

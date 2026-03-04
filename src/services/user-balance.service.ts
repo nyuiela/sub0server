@@ -27,7 +27,7 @@ export interface TransactionRecord {
 export async function updateUserBalance(update: UserBalanceUpdate): Promise<void> {
   const prisma = getPrismaClient();
   const { userId, tokenAddress, amount, operation, txHash, reason } = update;
-  
+
   // Validate amount
   const amountDecimal = new Decimal(amount);
   if (amountDecimal.lte(0)) {
@@ -51,7 +51,7 @@ export async function updateUserBalance(update: UserBalanceUpdate): Promise<void
       data: {
         userId,
         tokenAddress,
-        balance: initialBalance.toFixed(18),
+        balance: initialBalance,
       },
     });
   } else {
@@ -76,7 +76,7 @@ export async function updateUserBalance(update: UserBalanceUpdate): Promise<void
         },
       },
       data: {
-        balance: newBalance.toFixed(18),
+        balance: newBalance,
         updatedAt: new Date(),
       },
     });
@@ -91,7 +91,7 @@ export async function updateUserBalance(update: UserBalanceUpdate): Promise<void
  */
 export async function getUserBalance(userId: string, tokenAddress: string): Promise<string> {
   const prisma = getPrismaClient();
-  
+
   const balance = await prisma.userBalance.findUnique({
     where: {
       userId_tokenAddress: {
@@ -113,7 +113,7 @@ export async function getAllUserBalances(userId: string): Promise<Array<{
   updatedAt: Date;
 }>> {
   const prisma = getPrismaClient();
-  
+
   const balances = await prisma.userBalance.findMany({
     where: { userId },
     select: {
@@ -134,8 +134,8 @@ export async function getAllUserBalances(userId: string): Promise<Array<{
  * Check if user has sufficient balance
  */
 export async function hasSufficientBalance(
-  userId: string, 
-  tokenAddress: string, 
+  userId: string,
+  tokenAddress: string,
   requiredAmount: string
 ): Promise<boolean> {
   const currentBalance = await getUserBalance(userId, tokenAddress);

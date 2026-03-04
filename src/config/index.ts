@@ -350,7 +350,31 @@ export const REDIS_CHANNELS = {
   TRADES: "trades",
   ORDER_BOOK_UPDATE: "order_book_update",
   AGENT_UPDATES: "agent_updates",
+  // New enhanced channels
+  ACTIVITY_LOG: "activity_log",
+  POSITION_UPDATES: "position_updates",
+  USER_ASSET_CHANGES: "user_asset_changes",
+  AI_ANALYSIS: "ai_analysis",
+  AGENT_MARKET_ACTIONS: "agent_market_actions",
 } as const;
 
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const ROOM_PREFIX = "market:";
+
+// Enhanced room structure
+export const ROOM_PATTERNS = {
+  /** Market-level room - all market activity */
+  MARKET: (marketId: string) => `market:${marketId}`,
+  /** User-scoped market room - only events relevant to this user in this market */
+  MARKET_USER: (marketId: string, userId: string) => `market:${marketId}:user:${userId}`,
+  /** Agent-scoped market room - events for an agent in a market */
+  MARKET_AGENT: (marketId: string, agentId: string) => `market:${marketId}:agent:${agentId}`,
+  /** Activity feed room for a market */
+  MARKET_ACTIVITY: (marketId: string) => `market:${marketId}:activity`,
+  /** AI analysis room for a market */
+  MARKET_AI: (marketId: string) => `market:${marketId}:ai`,
+  /** All markets list */
+  MARKETS: "markets",
+  /** Global agent updates */
+  AGENT: (agentId: string) => `agent:${agentId}`,
+} as const;
