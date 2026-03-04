@@ -61,7 +61,6 @@ function serializeMarket(market: {
     volume: market.volume.toString(),
     resolutionDate: market.resolutionDate.toISOString(),
     liquidity: market.liquidity?.toString() ?? null,
-    pnl: market.pnl?.toString() ?? null,
   };
 }
 
@@ -596,8 +595,6 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     if (raw.status !== undefined) data.status = raw.status;
     if (raw.platform !== undefined) data.platform = raw.platform;
     if (raw.liquidity !== undefined) data.liquidity = raw.liquidity;
-    if (raw.confidence !== undefined) data.confidence = raw.confidence;
-    if (raw.pnl !== undefined) data.pnl = raw.pnl;
     const prisma = getPrismaClient();
     const market = await prisma.market.update({
       where: { id: req.params.id },

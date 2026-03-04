@@ -53,7 +53,6 @@ function serializeMarket(market: {
     conditionId: market.conditionId,
     platform: market.platform,
     liquidity: market.liquidity?.toString() ?? null,
-    pnl: market.pnl?.toString() ?? null,
     createdAt: market.createdAt.toISOString(),
     updatedAt: market.updatedAt.toISOString(),
   };
@@ -161,7 +160,6 @@ export async function registerSdkApiRoutes(app: FastifyInstance): Promise<void> 
       liquidity: base.liquidity,
       agentsEngagingCount: stats?.agentsEngaging ?? 0,
       positionIds,
-      pnl: base.pnl,
       newsCount: stats?.newsCount ?? 0,
       orderBookSnapshot: orderBook.snapshot,
       positions: market.positions,

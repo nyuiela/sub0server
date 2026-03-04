@@ -12,9 +12,6 @@ export interface AgentMarketSuggestion {
   context?: string;
 }
 
-/** Which AI agent generated the market; stored on Market.agentSource, not exposed on public API. */
-export type AgentSource = "gemini" | "grok" | "openwebui";
-
 /**
  * Payload for CRE createMarket action (HTTP body).
  * Matches sub0cre markets workflow CreateMarketPayload and create-market-payload.json.
@@ -28,8 +25,6 @@ export interface CreCreateMarketPayload {
   oracleType: number;
   marketType: number;
   creatorAddress: string;
-  /** Which agent generated this market; passed to onchain-created callback. */
-  agentSource?: AgentSource;
   amountUsdc?: string;
   apiKey?: string;
   /** Backend market id (draft); CRE echoes in callback so backend can update by id. */
@@ -81,5 +76,4 @@ export interface OnchainMarketCreatedBody {
   outcomeSlotCount: number;
   oracleType: number;
   marketType: number;
-  agentSource?: AgentSource;
 }

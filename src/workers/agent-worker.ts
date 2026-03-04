@@ -233,6 +233,39 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
     currentPositions,
   });
 
+  // Store full AI reasoning in AgentReasoning table
+  try {
+    const modelSettings = agent.modelSettings as { model?: string } | null;
+    const modelUsed = modelSettings?.model || "gemini-2.0-flash";
+    
+    await prisma.agentReasoning.create({
+      data: {
+        agentId,
+        marketId,
+        model: modelUsed,
+        userContext: decision.prompt || `Market: ${market.name}\nOutcomes: ${outcomes.join(", ")}\nCurrent Positions: ${currentPositions.length} positions`,
+        reasoning: decision.reason || "No reasoning provided",
+        response: decision.fullResponse || JSON.stringify({
+          action: decision.action,
+          outcomeIndex: decision.outcomeIndex,
+          quantity: decision.quantity,
+          reason: decision.reason,
+          nextFollowUpInMs: decision.nextFollowUpInMs
+        }),
+        actionTaken: decision.action,
+        tradeReason: decision.reason?.slice(0, 2000) || "No reason provided",
+        promptTokens: 0, // TODO: Track actual token usage
+        completionTokens: 0,
+        totalTokens: 0,
+        estimatedCost: 0,
+      },
+    });
+    console.log(`Stored AI reasoning for market ${marketId}, action: ${decision.action}`);
+  } catch (error) {
+    console.error("Failed to store AI reasoning:", error);
+    // Don't fail the whole process if reasoning storage fails
+  }
+
   // Create/update position based on agent decision BEFORE order submission
   const marketContext = {
     marketName: market.name,

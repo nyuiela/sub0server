@@ -249,17 +249,12 @@ model Market {
   /// * Tx hash of create(Market) when created via CRE. Audit only.
   createMarketTxHash   String?
   platform             MarketPlatform        @default(NATIVE)
-  /// * Which AI agent created this market (e.g. gemini, grok). Internal only; not exposed on public API.
-  agentSource          String?
   /// * Optional rules for agent settlement (benchmark for deliberation). Offchain only.
   settlementRules      String?
   liquidity            Decimal?              @db.Decimal(28, 8)
-  confidence           Float?
-  pnl                  Decimal?              @db.Decimal(28, 8)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   liquiditySeeded      Boolean               @default(false)
-  tradeReason          String                @default("No reason")
   agentEnqueuedMarkets AgentEnqueuedMarket[]
   agentReasons         AgentReasoning[]
   aiLogs               AiLog[]

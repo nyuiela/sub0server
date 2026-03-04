@@ -51,6 +51,10 @@ export interface TradingDecision {
   reason?: string;
   /** When to run analysis again (ms from now). Optional; e.g. 3600000 = 1h, 86400000 = 24h. */
   nextFollowUpInMs?: number;
+  /** Full LLM response text for debugging and storage */
+  fullResponse?: string;
+  /** Raw prompt sent to LLM */
+  prompt?: string;
 }
 
 function buildPrompt(ctx: AgentMarketContext): string {
@@ -68,7 +72,24 @@ SIMULATION MODE (STRICT):
     ctx.currentPositions != null && ctx.currentPositions.length > 0
       ? `\nYOUR CURRENT POSITIONS IN THIS MARKET:\n${ctx.currentPositions.map((p) => `  outcome ${p.outcomeIndex} ${p.side}: ${p.quantity} shares`).join("\n")}\n- You can skip (hold), buy (add LONG or reduce SHORT), or sell (reduce LONG or close). If you sell, quantity must not exceed your LONG position for that outcome.`
       : "\nYOUR CURRENT POSITIONS IN THIS MARKET: None (no open positions).\n- You can skip (hold), or buy to open a position.";
-  return `You are a prediction market trading agent. Given the market, your persona, and your current positions, decide whether to trade (skip, buy, or sell).${simBlock}
+
+  const isGrok = ctx.model && isGrokModel(ctx.model);
+  const searchInstruction = isGrok ? `
+INTERNET SEARCH ENABLED: You have access to real-time internet search. USE IT to research:
+- Recent news, events, and developments related to this market
+- Expert opinions and analysis
+- Historical data and trends
+- Social media sentiment and discussions
+- Any relevant information that could impact the outcome
+
+RESEARCH STRATEGY:
+1. Search for recent news about the market topic
+2. Look for expert predictions and analysis
+3. Check social media for sentiment
+4. Consider historical patterns
+5. Make an informed trading decision based on your research` : "";
+
+  return `You are an expert prediction market trader with deep analytical capabilities. Your goal is to make informed trading decisions based on thorough research and analysis.${simBlock}
 
 MARKET: ${ctx.marketName}
 OUTCOMES (index required for outcomeIndex):
@@ -76,7 +97,17 @@ ${outcomeList}
 ${posBlock}
 OUTCOME TEXT: ${ctx.outcomes.map((o, i) => `  ${i}: ${o}`).join("\n")}
 
-AGENT: ${ctx.agentName}${ctx.personaSummary ? `\nPERSONA (summary): ${ctx.personaSummary.slice(0, 2000)}` : ""}
+AGENT: ${ctx.agentName}${ctx.personaSummary ? `\nPERSONA: ${ctx.personaSummary.slice(0, 2000)}` : ""}
+
+${searchInstruction}
+
+TRADING INSTRUCTIONS:
+- Analyze the market thoroughly using all available information
+- Consider both fundamental factors and market sentiment
+- Look for edge cases and contrarian opportunities
+- Provide detailed reasoning for your decision
+- Default to trading rather than skipping - find opportunities others miss
+- If you must skip, explain what information would make you trade
 
 Respond with JSON only, no markdown:
 {
@@ -84,11 +115,11 @@ Respond with JSON only, no markdown:
   "outcomeIndex": 0,
   "outcomeText": "outcome text",
   "quantity": "10",
-  "reason": "one sentence",
+  "reason": "detailed explanation of your analysis and decision (2-3 sentences)",
   "nextFollowUpInMs": 3600000
 }
 - If action is skip, outcomeIndex and quantity can be omitted (you are holding).
-- If buy or sell: outcomeIndex must be a valid index (0 to ${Math.max(0, ctx.outcomes.length - 1)}), quantity a positive number string (e.g. "5" or "10"). For sell, do not exceed your LONG position for that outcome.
+- If buy or sell: outcomeIndex must be a valid index (0 to ${Math.max(0, ctx.outcomes.length - 1)}), quantity a positive number string representing USDC amount (e.g. "5" for 5 USDC, "10" for 10 USDC, "20" for 20 USDC). For sell, do not exceed your LONG position for that outcome.
 - nextFollowUpInMs (optional): when to re-run analysis (ms from now). E.g. 3600000 = 1h, 86400000 = 24h. Omit for default.`;
 }
 
@@ -167,6 +198,9 @@ async function callGrokTrading(ctx: AgentMarketContext, model: string): Promise<
   if (!apiKey?.trim()) {
     throw new Error("No Grok/XAI API key configured");
   }
+  
+  const prompt = buildPrompt(ctx);
+  
   const res = await fetch(XAI_CHAT_URL, {
     method: "POST",
     headers: {
@@ -175,11 +209,12 @@ async function callGrokTrading(ctx: AgentMarketContext, model: string): Promise<
     },
     body: JSON.stringify({
       model,
-      messages: [{ role: "user", content: buildPrompt(ctx) }],
-      max_tokens: 512,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 1024,
       temperature: 0.3,
     }),
   });
+  
   if (!res.ok) {
     if (res.status === 429) {
       recordRateLimit("grok_key");
@@ -187,16 +222,22 @@ async function callGrokTrading(ctx: AgentMarketContext, model: string): Promise<
     const text = await res.text();
     throw new Error(`Grok trading analysis error ${res.status}: ${text.slice(0, 300)}`);
   }
+  
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const text = data?.choices?.[0]?.message?.content?.trim();
-  const outcomeText = data?.choices?.[0]?.message?.content?.trim();
-  if (!text) throw new Error("Empty Grok response");
-  if (!outcomeText) throw new Error("Empty Grok outcome text");
+  const content = data?.choices?.[0]?.message?.content?.trim();
+  
+  if (!content) throw new Error("Empty Grok response");
+  
+  // Parse the content to extract both text and outcome
+  const text = content;
+  const outcomeText = content; // For now, use same content for both
+  
   return { text, outcomeText };
 }
 
 export async function runTradingAnalysis(ctx: AgentMarketContext): Promise<TradingDecision> {
   const effectiveModel = (ctx.model?.trim() || DEFAULT_MODEL).toLowerCase();
+  const prompt = buildPrompt(ctx);
 
   try {
     let text: string;
@@ -214,11 +255,23 @@ export async function runTradingAnalysis(ctx: AgentMarketContext): Promise<Tradi
       text = result.text;
       outcomeText = result.outcomeText;
     }
-    return parseTradingResponse(text, outcomeText, ctx);
+    
+    const decision = parseTradingResponse(text, outcomeText, ctx);
+    
+    // Add full response and prompt to decision
+    decision.fullResponse = text;
+    decision.prompt = prompt;
+    
+    return decision;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("No Gemini trading key") || message.includes("No Grok/XAI")) {
-      return { action: "skip", reason: message };
+      return { 
+        action: "skip", 
+        reason: message,
+        fullResponse: `Error: ${message}`,
+        prompt: prompt
+      };
     }
     throw err;
   }
