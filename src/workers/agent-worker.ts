@@ -210,10 +210,10 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
   const simulationContext =
     isSimulate && enqueued?.simulateDateRangeEnd
       ? {
-          asOfDate: enqueued.simulateDateRangeEnd.toISOString(),
-          dateRangeEnd: enqueued.simulateDateRangeEnd.toISOString(),
-          dateRangeStart: enqueued.simulateDateRangeStart?.toISOString(),
-        }
+        asOfDate: enqueued.simulateDateRangeEnd.toISOString(),
+        dateRangeEnd: enqueued.simulateDateRangeEnd.toISOString(),
+        dateRangeStart: enqueued.simulateDateRangeStart?.toISOString(),
+      }
       : undefined;
 
   const modelSettings = agent.modelSettings as { model?: string } | null;
@@ -265,8 +265,10 @@ async function executeAgentLoop(job: Job<AgentJobPayload>): Promise<void> {
       where: { agentId, marketId, simulationId: simulationId ?? null },
       data: {
         status: "DISCARDED",
-        discardReason: decision.reason?.slice(0, 2000) ?? null,
-        tradeReason: decision.reason?.slice(0, 2000) ?? "no reason provided",
+        // discardReason: decision.reason?.slice(0, 2000) ?? null,
+        // tradeReason: decision.reason?.slice(0, 2000) ?? "no reason provided",
+        discardReason: decision.reason,
+        tradeReason: decision.reason,
         nextRunAt: followUpMs > 0 ? nextRun : null,
       },
     });

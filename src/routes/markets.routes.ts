@@ -21,7 +21,7 @@ import {
 import { getMarketHolders, getMarketTraders } from "../services/activities.service.js";
 import { createPlatformPositionsForMarket } from "../services/platform-positions.service.js";
 import { getMarketPrices, getMarketQuote } from "../services/lmsr-prices.service.js";
-import { requestLmsrPricingFromCre, type CreLmsrPricingRequest } from "../services/cre-lmsr-pricing.service.js";
+import { requestLmsrPricingFromCre, type CreLmsrPricingRequest, getPendingPricingRequestClean } from "../services/cre-lmsr-pricing.service.js";
 import { z } from "zod";
 import {
   marketPricesQuerySchema,
@@ -407,6 +407,7 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
 
       // Request pricing from CRE
       const result = await requestLmsrPricingFromCre(pricingRequest);
+      console.log("result", result)
 
       if (!result.success) {
         return reply.code(500).send({
@@ -415,6 +416,7 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
           requestId,
         });
       }
+      console.log("result", result)
 
       return reply.send({
         success: true,
@@ -431,6 +433,48 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
             }
           }
         }
+      });
+    }
+  );
+
+  // GET /api/markets/:id/pricing-status - Get pricing request status
+  app.get(
+    "/api/markets/:id/pricing-status",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: { requestId: string };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const { requestId } = req.query;
+
+      if (!requestId) {
+        return reply.code(400).send({
+          error: "Missing requestId query parameter",
+          message: "Provide requestId to check pricing request status"
+        });
+      }
+
+      // Check if request is still pending
+      const pendingRequest = getPendingPricingRequestClean(requestId);
+
+      if (pendingRequest) {
+        return reply.send({
+          success: true,
+          requestId,
+          status: "PENDING",
+          message: "Pricing request is still being processed",
+          marketId: pendingRequest.marketId,
+          userId: pendingRequest.userId,
+          agentId: pendingRequest.agentId,
+        });
+      }
+
+      // Request not found (either completed or expired)
+      return reply.code(404).send({
+        error: "Pricing request not found",
+        message: "Request ID not found or has expired. Check WebSocket for completed results."
       });
     }
   );

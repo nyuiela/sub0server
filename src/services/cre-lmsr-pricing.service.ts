@@ -162,7 +162,23 @@ export async function handleCreLmsrPricingCallback(
 }
 
 /**
- * Get pending request info (for checking if a request is still pending)
+ * Get clean pending request info (for API responses)
+ */
+export function getPendingPricingRequestClean(requestId: string) {
+  const pending = pendingRequests.get(requestId);
+  if (!pending) return null;
+
+  // Return clean object without timeout to avoid circular JSON
+  return {
+    userId: pending.userId,
+    agentId: pending.agentId,
+    marketId: pending.marketId,
+    // Don't include timeout as it causes circular JSON
+  };
+}
+
+/**
+ * Get pending request info (includes timeout for internal use)
  */
 export function getPendingPricingRequest(requestId: string) {
   return pendingRequests.get(requestId);
