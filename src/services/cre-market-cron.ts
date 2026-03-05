@@ -74,6 +74,15 @@ async function triggerCreateMarketsFromBackend(log: FastifyBaseLogger): Promise<
 
 export function startCreMarketCron(log: FastifyBaseLogger): void {
   if (!config.creMarketCronEnabled || !config.creHttpUrl?.trim()) {
+    if (!config.creHttpUrl?.trim()) {
+      log.info(
+        "CRE market cron skipped: set CRE_HTTP_URL (e.g. http://localhost:8080) and CRE_MARKET_CRON_ENABLED=true to have backend trigger createMarketsFromBackend"
+      );
+    } else {
+      log.info(
+        "CRE market cron skipped: set CRE_MARKET_CRON_ENABLED=true to have backend trigger createMarketsFromBackend"
+      );
+    }
     return;
   }
   const ms = config.creMarketCronIntervalMs;

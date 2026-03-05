@@ -6,7 +6,7 @@ import { submitOrder } from "../engine/order-queue.js";
 import { requireUserOrApiKey } from "../lib/permissions.js";
 import { requireUser, requireApiKey } from "../lib/auth.js";
 import { orderSubmitSchema, type OrderSubmitInput } from "../schemas/order.schema.js";
-import type { CreOrderPayload } from "../types/cre-order.js";
+import type { CreOrderPayload, AgentCrePayload } from "../types/cre-order.js";
 import { executeUserMarketTradeOnCre } from "../services/cre-execute-trade.service.js";
 import { enqueueOrderAndTradesForPersistence } from "../workers/trades-queue.js";
 import { getRedisPublisher } from "../lib/redis.js";
@@ -62,19 +62,21 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    let crePayload: CreOrderPayload | undefined;
+    let crePayload: CreOrderPayload | AgentCrePayload | undefined;
     if (isUserOrder && raw.userSignature && raw.tradeCostUsdc != null && raw.nonce != null && raw.deadline != null && market.questionId && market.conditionId) {
       crePayload = {
         questionId: market.questionId,
         conditionId: market.conditionId,
         outcomeIndex: raw.outcomeIndex,
         buy: raw.side === "BID",
-        quantity: raw.quantity as any,
+        quantity: raw.quantity as string,
         tradeCostUsdc: raw.tradeCostUsdc,
         nonce: raw.nonce,
         deadline: raw.deadline,
         userSignature: raw.userSignature,
       };
+    } else if (agentId != null && agentId !== "" && raw.userSignature?.trim()) {
+      crePayload = { userSignature: raw.userSignature.trim() };
     }
 
     const orderId = randomUUID();
@@ -93,9 +95,9 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       chainKey,
     };
 
-    if (type === "MARKET" && isUserOrder && crePayload) {
+    if (type === "MARKET" && isUserOrder && crePayload && "questionId" in crePayload) {
       try {
-        const creResult = await executeUserMarketTradeOnCre(crePayload, raw.side);
+        const creResult = await executeUserMarketTradeOnCre(crePayload as CreOrderPayload, raw.side);
         if (!creResult.ok) {
           return reply.code(502).send({
             error: "CRE execution failed",

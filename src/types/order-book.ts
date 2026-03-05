@@ -95,7 +95,8 @@ export interface ExecutedTrade {
   /** Maker (resting order); for position updates. */
   makerUserId?: string | null;
   makerAgentId?: string | null;
-  userSignature: string;
+  /** EIP-712 signature from taker/maker when available; agent signature is taken from order.crePayload in persistence. */
+  userSignature?: string | null;
   executedAt: number;
 }
 

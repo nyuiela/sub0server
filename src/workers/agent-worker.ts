@@ -31,11 +31,104 @@ async function submitOrderFromWorker(payload: {
   side: "BID" | "ASK";
   quantity: string;
   chainKey?: AgentChainKey | null;
+  userSignature?: string;
 }): Promise<{ ok: boolean; status: number; body?: unknown }> {
   const apiKey = config.apiKey;
   if (!apiKey?.trim()) {
     return { ok: false, status: 0, body: { error: "API_KEY not set; cannot submit order from worker" } };
   }
+
+  // Get agent info for signing
+  const prisma = getPrismaClient();
+  const agent = await prisma.agent.findUnique({
+    where: { id: payload.agentId },
+    select: {
+      id: true,
+      walletAddress: true,
+      encryptedPrivateKey: true,
+    },
+  });
+
+  if (!agent) {
+    return { ok: false, status: 404, body: { error: "Agent not found" } };
+  }
+
+  // Check if this is an agent order that needs signing
+  const isAgentOrder = payload.agentId && !payload.userId;
+  let userSignature = payload.userSignature;
+
+  if (isAgentOrder && !userSignature) {
+    // This is an agent order - sign it with agent's private key
+    try {
+      // Import signing dependencies
+      const { createWalletClient, http } = await import("viem");
+      const { sepolia } = await import("viem/chains");
+      const { privateKeyToAccount } = await import("viem/accounts");
+      const { decryptPrivateKey } = await import("../services/agent-keys.service.js");
+      const { buildUserTradeTypedData } = await import("../lib/signature.js");
+
+      // Check if agent has private key
+      if (!agent.encryptedPrivateKey) {
+        console.log("⚠️ No encrypted private key available for agent order signing");
+        return { ok: false, status: 400, body: { error: "Agent has no private key for signing" } };
+      }
+
+      // Decrypt private key
+      const privateKey = decryptPrivateKey(agent.encryptedPrivateKey);
+      if (!privateKey) {
+        console.log("⚠️ Could not decrypt agent private key");
+        return { ok: false, status: 500, body: { error: "Failed to decrypt private key" } };
+      }
+
+      // Create account from private key
+      const account = privateKeyToAccount(privateKey as `0x${string}`);
+      
+      // Verify account matches agent wallet
+      if (account.address.toLowerCase() !== (agent.walletAddress || "").toLowerCase()) {
+        console.log(`⚠️ Account mismatch: derived ${account.address} vs agent ${agent.walletAddress}`);
+        return { ok: false, status: 400, body: { error: "Account address mismatch" } };
+      }
+
+      // Generate nonce and deadline
+      const nonce = BigInt(Date.now());
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+
+      // Build EIP-712 typed data
+      const typedData = buildUserTradeTypedData({
+        questionId: payload.marketId,
+        outcomeIndex: payload.outcomeIndex,
+        buy: payload.side === "BID",
+        quantity: payload.quantity,
+        maxCostUsdc: payload.quantity, // Use quantity as max cost
+        nonce: nonce.toString(),
+        deadline,
+      });
+
+      // Create wallet client for signing
+      const walletClient = createWalletClient({
+        account,
+        chain: sepolia,
+        transport: http(process.env.CHAIN_RPC_URL || "https://sepolia.drpc.org"),
+      });
+
+      // Sign the typed data
+      const signature = await walletClient.signTypedData({
+        domain: typedData.domain,
+        types: typedData.types,
+        primaryType: typedData.primaryType,
+        message: typedData.message,
+      });
+
+      userSignature = signature;
+      console.log(`✅ Agent order signed with EIP-712 signature`);
+      console.log(`Signature: ${signature.slice(0, 20)}...${signature.slice(-20)}`);
+
+    } catch (error) {
+      console.error("❌ Failed to sign agent order:", error);
+      return { ok: false, status: 500, body: { error: "Failed to sign order" } };
+    }
+  }
+
   const url = `${config.backendUrl.replace(/\/$/, "")}/api/orders`;
   const body: Record<string, unknown> = {
     marketId: payload.marketId,
@@ -44,9 +137,13 @@ async function submitOrderFromWorker(payload: {
     type: "MARKET",
     quantity: payload.quantity,
     agentId: payload.agentId,
+    userSignature: userSignature, // Always include signature if available
   };
   if (payload.chainKey != null && payload.chainKey !== CHAIN_KEY_MAIN) {
     body.chainKey = payload.chainKey;
+  } else {
+    // Always include chainKey for agent orders
+    body.chainKey = CHAIN_KEY_MAIN;
   }
   const res = await fetch(url, {
     method: "POST",

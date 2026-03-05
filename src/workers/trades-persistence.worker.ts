@@ -17,7 +17,7 @@ import { getPrismaClient } from "../lib/prisma.js";
 import { getRedisPublisher } from "../lib/redis.js";
 import type { PrismaClient } from "@prisma/client";
 import type { ExecutedTrade, EngineOrder } from "../types/order-book.js";
-import type { CreOrderPayload } from "../types/cre-order.js";
+import type { CreOrderPayload, AgentCrePayload } from "../types/cre-order.js";
 import { TRADES_QUEUE_NAME, type TradesJobPayload } from "./trades-queue.js";
 import { executeUserTradeOnCre, executeAgentTradeOnCre, executeUserMarketTradeOnCre } from "../services/cre-execute-trade.service.js";
 import {
@@ -283,20 +283,24 @@ function tradeCostUsdcForFill(quantity: string, price: string): string {
   return new Decimal(quantity).times(price).toString();
 }
 
+function getAgentSignatureFromPayload(payload: unknown): string | null {
+  if (payload == null || typeof payload !== "object") return null;
+  const sig = (payload as { userSignature?: string }).userSignature;
+  return typeof sig === "string" && sig.trim() !== "" ? sig.trim() : null;
+}
+
 /**
- * Execute on CRE: user order once when FILLED (with stored crePayload); agent orders per fill.
+ * Execute on CRE: user order once when FILLED (with full crePayload); agent orders per fill using signature stored on order.
  */
 async function executeCreTrades(
   prisma: PrismaClient,
   order: EngineOrder | undefined,
   trades: ExecutedTrade[]
 ): Promise<void> {
-  if (order?.status === "FILLED" && order.crePayload != null) {
+  if (order?.status === "FILLED" && order.crePayload != null && order.userId != null && order.agentId == null) {
     const payload = order.crePayload as CreOrderPayload;
-    if (payload.userSignature) {
-      // const result = await executeUserTradeOnCre(payload);
+    if ("questionId" in payload && payload.userSignature) {
       const result = await executeUserMarketTradeOnCre(payload, order.side);
-
       if (!result.ok) {
         console.warn(`CRE user trade failed (order ${order.id}):`, result.error);
       }
@@ -318,36 +322,63 @@ async function executeCreTrades(
     const buy = t.side === "BID";
 
     if (t.agentId) {
-      const result = await executeAgentTradeOnCre({
-        agentId: t.agentId,
-        questionId,
-        outcomeIndex: t.outcomeIndex,
-        buy,
-        quantity: t.quantity,
-        tradeCostUsdc,
-        nonce,
-        deadline,
-        userSignature: t.userSignature || "signature not added 1"
-      });
-      if (!result.ok) {
-        console.warn(`CRE agent trade failed (taker ${t.agentId}, trade ${t.id}):`, result.error);
+      const takerSig =
+        order?.agentId === t.agentId && t.takerOrderId === order?.id
+          ? getAgentSignatureFromPayload(order.crePayload)
+          : null;
+      const agentSignature = t.userSignature?.trim() && t.userSignature !== "signature not added 1"
+        ? t.userSignature
+        : takerSig;
+      if (agentSignature) {
+        const result = await executeAgentTradeOnCre({
+          agentId: t.agentId,
+          questionId,
+          outcomeIndex: t.outcomeIndex,
+          buy,
+          quantity: t.quantity,
+          tradeCostUsdc,
+          nonce,
+          deadline,
+          userSignature: agentSignature,
+        });
+        if (!result.ok) {
+          console.warn(`CRE agent trade failed (taker ${t.agentId}, trade ${t.id}):`, result.error);
+        }
+      } else {
+        console.log(`Skipping CRE execution for agent trade ${t.id} - no valid signature available`);
       }
     }
 
     if (t.makerAgentId) {
-      const result = await executeAgentTradeOnCre({
-        agentId: t.makerAgentId,
-        questionId,
-        outcomeIndex: t.outcomeIndex,
-        buy: !buy,
-        quantity: t.quantity,
-        tradeCostUsdc,
-        nonce,
-        deadline,
-        userSignature: t.userSignature || "agent signature not added 2",
+      let makerSig: string | null = null;
+      const makerOrder = await prisma.order.findUnique({
+        where: { id: t.makerOrderId },
+        select: { crePayload: true, agentId: true },
       });
-      if (!result.ok) {
-        console.warn(`CRE agent trade failed (maker ${t.makerAgentId}, trade ${t.id}):`, result.error);
+      if (makerOrder?.agentId === t.makerAgentId && makerOrder.crePayload != null) {
+        makerSig = getAgentSignatureFromPayload(makerOrder.crePayload);
+      }
+      const agentSignature =
+        t.userSignature?.trim() && t.userSignature !== "agent signature not added 2"
+          ? t.userSignature
+          : makerSig;
+      if (agentSignature) {
+        const result = await executeAgentTradeOnCre({
+          agentId: t.makerAgentId,
+          questionId,
+          outcomeIndex: t.outcomeIndex,
+          buy: !buy,
+          quantity: t.quantity,
+          tradeCostUsdc,
+          nonce,
+          deadline,
+          userSignature: agentSignature,
+        });
+        if (!result.ok) {
+          console.warn(`CRE agent trade failed (maker ${t.makerAgentId}, trade ${t.id}):`, result.error);
+        }
+      } else {
+        console.log(`Skipping CRE execution for agent maker trade ${t.id} - no valid signature available`);
       }
     }
   }

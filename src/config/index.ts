@@ -148,6 +148,10 @@ function makeConfig() {
     get agentMarketAmountUsdc(): string {
       return process.env.AGENT_MARKET_AMOUNT_USDC?.trim() || "1000000";
     },
+    /** When true, if all LLM providers (Gemini/Grok/Open WebUI) fail or return empty, use static demo market payloads so CRE can still create markets. Use when APIs are out of quota. */
+    get agentMarketCreationFallbackDemo(): boolean {
+      return process.env.AGENT_MARKET_CREATION_FALLBACK_DEMO === "true" || process.env.AGENT_MARKET_CREATION_FALLBACK_DEMO === "1";
+    },
     /** Default collateral token address for agent-created markets (e.g. USDC). */
     get defaultCollateralToken(): string {
       return optionalEnv("DEFAULT_COLLATERAL_TOKEN", contracts.contracts?.usdc);

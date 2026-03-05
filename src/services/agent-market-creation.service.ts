@@ -340,6 +340,28 @@ function toCrePayload(
 /** Max markets per run sent to CRE; must not exceed CRE batch cap (e.g. 50). */
 const MAX_MARKETS_PER_RUN = 50;
 
+/** Static demo questions used when AGENT_MARKET_CREATION_FALLBACK_DEMO=true and all LLM providers fail (e.g. quota). */
+const DEMO_MARKET_QUESTIONS = [
+  `Will Bitcoin exceed $100,000 by the end of ${CURRENT_YEAR}?`,
+  `Will the S&P 500 close higher on the last trading day of ${CURRENT_YEAR} than on Jan 1?`,
+  `Will there be a new AI model release with >1M context window in ${CURRENT_YEAR}?`,
+];
+
+function getDemoMarketPayloads(maxCount: number): CreCreateMarketPayload[] {
+  const n = Math.min(maxCount, DEMO_MARKET_QUESTIONS.length);
+  return DEMO_MARKET_QUESTIONS.slice(0, n).map((question) => ({
+    action: "createMarket",
+    question,
+    oracle: config.platformOracleAddress,
+    duration: DEFAULT_DURATION_SECONDS,
+    outcomeSlotCount: DEFAULT_OUTCOME_SLOT_COUNT,
+    oracleType: ORACLE_TYPE_PLATFORM,
+    marketType: MARKET_TYPE_PUBLIC,
+    creatorAddress: config.platformCreatorAddress,
+    amountUsdc: config.agentMarketAmountUsdc,
+  }));
+}
+
 /**
  * Generates agent market payloads from Gemini, Grok (XAI), and Open WebUI (when configured).
  * Count is total markets: e.g. count=1 => 1 total market from one agent.
@@ -372,6 +394,7 @@ export async function generateAgentMarkets(
   const safeCallGemini = (): Promise<AgentMarketSuggestion[]> =>
     callGemini(geminiCount).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
+      console.warn("agent-market-creation: Gemini returned no markets:", msg);
       if (msg.includes("429")) {
         recordRateLimit("gemini_market");
         recordRateLimit("gemini_model");
@@ -379,9 +402,17 @@ export async function generateAgentMarkets(
       return [];
     });
   const safeCallGrok = (): Promise<AgentMarketSuggestion[]> =>
-    callGrok(grokCount).catch(() => []);
+    callGrok(grokCount).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("agent-market-creation: Grok returned no markets:", msg);
+      return [];
+    });
   const safeCallOpenWebUI = (): Promise<AgentMarketSuggestion[]> =>
-    callOpenWebUI(openWebUiCount).catch(() => []);
+    callOpenWebUI(openWebUiCount).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn("agent-market-creation: Open WebUI returned no markets:", msg);
+      return [];
+    });
 
   const tasks: Promise<AgentMarketSuggestion[]>[] = [
     safeCallGemini(),
@@ -404,11 +435,27 @@ export async function generateAgentMarkets(
     openWebUiCount
   );
 
-  return [
+  const result = [
     ...geminiFiltered.map((s) => toCrePayload(s)),
     ...grokFiltered.map((s) => toCrePayload(s)),
     ...openWebUiFiltered.map((s) => toCrePayload(s)),
   ];
+
+  if (result.length === 0) {
+    if (config.agentMarketCreationFallbackDemo) {
+      const demo = getDemoMarketPayloads(count);
+      console.warn(
+        "agent-market-creation: all providers returned 0; using fallback demo markets (AGENT_MARKET_CREATION_FALLBACK_DEMO=true).",
+        { count: demo.length }
+      );
+      return demo;
+    }
+    console.warn(
+      "agent-market-creation: generateAgentMarkets returned 0 markets. Set GEMINI_API_KEY or GROK_API_KEY in sub0server .env and ensure the LLM returns valid JSON with 'question' fields. Or set AGENT_MARKET_CREATION_FALLBACK_DEMO=true for demo markets when APIs are out of quota."
+    );
+  }
+
+  return result;
 }
 
 /**

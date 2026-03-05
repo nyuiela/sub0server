@@ -351,6 +351,11 @@ export async function registerAgentMarketsInternalRoutes(
       const count = parsed.success ? parsed.data.count ?? config.agentMarketsPerJob : config.agentMarketsPerJob;
       try {
         const payloads = await generateAgentMarkets(count);
+        if (payloads.length === 0) {
+          req.log.warn(
+            "cre/agent-markets: returning 0 markets; CRE will create nothing. Check backend logs for 'agent-market-creation:' (GEMINI_API_KEY or GROK_API_KEY)."
+          );
+        }
         return reply.send({ data: payloads, count: payloads.length });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
