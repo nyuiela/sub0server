@@ -327,6 +327,7 @@ async function executeCreTrades(
         tradeCostUsdc,
         nonce,
         deadline,
+        userSignature: t.userSignature || "signature not added 1"
       });
       if (!result.ok) {
         console.warn(`CRE agent trade failed (taker ${t.agentId}, trade ${t.id}):`, result.error);
@@ -343,6 +344,7 @@ async function executeCreTrades(
         tradeCostUsdc,
         nonce,
         deadline,
+        userSignature: t.userSignature || "agent signature not added 2",
       });
       if (!result.ok) {
         console.warn(`CRE agent trade failed (maker ${t.makerAgentId}, trade ${t.id}):`, result.error);

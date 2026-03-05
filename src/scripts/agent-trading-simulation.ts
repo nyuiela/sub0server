@@ -3,6 +3,7 @@
 /**
  * Agent Trading Simulation Script - Fixed Version
  * Uses USDC for trading, proper transaction hashes, and order book verification
+ * Now with EIP-712 signing for orders
  */
 
 // Load environment variables from .env file
@@ -14,15 +15,18 @@ import { getPrismaClient } from "../lib/prisma.js";
 import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 import { runTradingAnalysis } from "../services/agent-trading-analysis.service.js";
 import { sepolia } from "viem/chains";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, createWalletClient } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { buildUserTradeTypedData } from "../lib/signature.js";
+import { decryptPrivateKey } from "../services/agent-keys.service.js";
 
 // EDIT THESE VALUES FOR YOUR SIMULATION
-const AGENT_ID = "5cff6b3a-4d88-4455-b4da-d9f2ffd04130"; // Change to your agent ID
+const AGENT_ID = "fb888532-72ca-475d-bf38-9035dadecc11"; // Change to your agent ID
 
 const MARKET_QUESTION_IDS = [
-  "0xd035c6ade15c01188f5a7c17e15be4d03b50868760f179a4975552336c156145",
-  "0x3c2e5e8edc0176579f8ca75e1af87fed62d56fb53038c4c8e943dba162647055",
-  "0x9293ab7a85f99fbf607f812e7b408bd553cbf484fba72b5f6a3eb921b23a3fc4",
+  "0x3ea53cc69f3c990ebe65a7df09221bce0ffbb22c852b502865216a627ce5697f",
+  "0x18680f5c93c53690715ced2d0cb22bef40076309b26dba8dd362e89c2c0c76f1",
+  "0x56a227b3d515a0705db97829173a6a4a372c6dec19e4b83496e1cee4141636f1",
 ];
 
 interface SimulationConfig {
@@ -52,6 +56,7 @@ async function submitOrderFromWorker(payload: {
   side: "BID" | "ASK";
   quantity: string;
   chainKey?: string | null;
+  userSignature?: string;
 }): Promise<{ ok: boolean; status: number; body?: unknown }> {
   const apiKey = process.env.API_KEY;
   if (!apiKey?.trim()) {
@@ -65,7 +70,12 @@ async function submitOrderFromWorker(payload: {
     type: "MARKET",
     quantity: payload.quantity,
     agentId: payload.agentId,
+    userSignature: payload.userSignature
   };
+  // Add userSignature if provided
+  if (payload.userSignature) {
+    body.userSignature = payload.userSignature;
+  }
   if (payload.chainKey != null && payload.chainKey !== CHAIN_KEY_MAIN) {
     body.chainKey = payload.chainKey;
   } else {
@@ -100,6 +110,93 @@ class AgentTradingSimulation {
     this.config = config;
   }
 
+  /**
+   * Sign an order using the agent's private key with EIP-712
+   */
+  private async signOrder(
+    agent: {
+      walletAddress: string | null;
+      encryptedPrivateKey: string | null;
+    },
+    marketQuestionId: string,
+    outcomeIndex: number,
+    side: "BID" | "ASK",
+    quantity: string,
+    maxCostUsdc: string
+  ): Promise<string | null> {
+    try {
+      // Check if we have the private key
+      if (!agent.encryptedPrivateKey) {
+        console.log("⚠️ No encrypted private key available for signing");
+        return null;
+      }
+
+      // Decrypt the private key using AES-256-GCM
+      const privateKey = this.decryptAgentPrivateKey(agent.encryptedPrivateKey);
+      if (!privateKey) {
+        console.log("⚠️ Could not decrypt private key");
+        return null;
+      }
+
+      // Create wallet account from private key
+      const account = privateKeyToAccount(privateKey as `0x${string}`);
+
+      // Verify account matches agent wallet
+      if (account.address.toLowerCase() !== (agent.walletAddress || "").toLowerCase()) {
+        console.log(`⚠️ Account mismatch: derived ${account.address} vs agent ${agent.walletAddress}`);
+        return null;
+      }
+
+      // Generate nonce and deadline
+      const nonce = BigInt(Date.now());
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+
+      // Build EIP-712 typed data
+      const typedData = buildUserTradeTypedData({
+        questionId: marketQuestionId,
+        outcomeIndex,
+        buy: side === "BID",
+        quantity,
+        maxCostUsdc,
+        nonce: nonce.toString(),
+        deadline,
+      });
+
+      // Create wallet client for signing
+      const walletClient = createWalletClient({
+        account,
+        chain: sepolia,
+        transport: http(process.env.CHAIN_RPC_URL || "https://sepolia.drpc.org"),
+      });
+
+      // Sign the typed data
+      const signature = await walletClient.signTypedData({
+        domain: typedData.domain,
+        types: typedData.types,
+        primaryType: typedData.primaryType,
+        message: typedData.message,
+      });
+
+      console.log(`✅ Order signed with EIP-712 signature`);
+      return signature;
+    } catch (error) {
+      console.error("❌ Failed to sign order:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Decrypt agent private key using AES-256-GCM
+   */
+  private decryptAgentPrivateKey(encryptedKey: string): string | null {
+    try {
+      return decryptPrivateKey(encryptedKey);
+    } catch (error) {
+      console.error("Failed to decrypt private key:", error);
+      return null;
+    }
+  }
+
   async run(): Promise<void> {
     console.log("Starting Agent Trading Simulation");
     console.log(`Agent ID: ${this.config.agentId}`);
@@ -122,11 +219,11 @@ class AgentTradingSimulation {
     for (const market of markets) {
       console.log(`\nProcessing Market: ${market.name}`);
       console.log(`Market ID: ${market.id}`);
-      
+
       try {
         const result = await this.processMarket(market, agent);
         results.push(result);
-        
+
         console.log(`Result: ${result.action?.toUpperCase()}`);
         if (result.reason) console.log(`Reason: ${result.reason}`);
         if (result.orderSubmitted) {
@@ -283,13 +380,13 @@ class AgentTradingSimulation {
     let preTradeBalance: string | undefined;
     let publicClient: any;
     let usdcAddress: string = "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF";
-    
+
     try {
       // Get real blockchain balance by calling USDC contract
       const { createPublicClient, http } = await import("viem");
       const { CHAIN_KEY_MAIN } = await import("../types/agent-chain.js");
       const { config } = await import("../config/index.js");
-      
+
       publicClient = createPublicClient({
         chain: {
           id: 11155111, // Sepolia
@@ -301,10 +398,10 @@ class AgentTradingSimulation {
         },
         transport: http(),
       });
-      
+
       // USDC contract address from contracts.json
       usdcAddress = "0xeF536e7Dc524566635Ae50E891BFC44d6619a1FF";
-      
+
       // Get real blockchain balance
       const balanceWei = await publicClient.readContract({
         address: usdcAddress as `0x${string}`,
@@ -320,10 +417,10 @@ class AgentTradingSimulation {
         functionName: 'balanceOf',
         args: [agent.walletAddress as `0x${string}`],
       });
-      
+
       preTradeBalance = (balanceWei as bigint).toString();
       console.log(`Agent balance BEFORE trade (blockchain): ${Number(preTradeBalance) / 1000000} USDC`);
-      
+
       if (Number(preTradeBalance) <= 10000000) { // Less than 10 USDC
         return {
           marketId: market.id,
@@ -337,16 +434,34 @@ class AgentTradingSimulation {
       console.log("Balance error:", error);
     }
 
-    // Step 8: Submit Real Order
-    console.log(`Submitting real order to Sepolia...`);
-    
+    // Step 8: Sign and Submit Real Order
+    console.log(`Signing and submitting real order to Sepolia...`);
+
+    // Sign the order with agent's private key
+    const maxCostUsdc = quantity; // Use quantity as max cost for now
+    const userSignature = await this.signOrder(
+      agent,
+      market.questionId,
+      outcomeIndex,
+      side,
+      quantity,
+      maxCostUsdc
+    );
+
+    if (userSignature) {
+      console.log(`✅ Order signed successfully`);
+      console.log(`Signature: ${userSignature.slice(0, 20)}...${userSignature.slice(-20)}`);
+    } else {
+      console.log(`⚠️ Could not sign order, proceeding without signature...`);
+    }
+
     // First, ensure market has liquidity
     try {
       console.log(`Adding liquidity to market ${market.id}...`);
-      
+
       const apiKey = process.env.API_KEY;
       const backendUrl = process.env.BACKEND_URL || "http://localhost:4000";
-      
+
       if (!apiKey?.trim()) {
         console.log("⚠️ API_KEY not set, skipping liquidity addition");
       } else {
@@ -367,7 +482,7 @@ class AgentTradingSimulation {
             agentId: agent.id,
           }),
         });
-        
+
         // Add ASK liquidity  
         const askResponse = await fetch(`${backendUrl}/api/orders`, {
           method: "POST",
@@ -379,13 +494,13 @@ class AgentTradingSimulation {
             marketId: market.id,
             outcomeIndex: 0,
             side: "ASK",
-            type: "LIMIT", 
+            type: "LIMIT",
             price: "0.55",
             quantity: "10000000", // 10 USDC
             agentId: agent.id,
           }),
         });
-        
+
         if (bidResponse.ok && askResponse.ok) {
           console.log(`✅ Liquidity added to market`);
           // Wait a moment for liquidity to be processed
@@ -408,7 +523,7 @@ class AgentTradingSimulation {
       console.log(`⚠️ Could not add liquidity, proceeding anyway...`);
       console.log(`Error:`, error);
     }
-    
+
     const orderResult = await submitOrderFromWorker({
       agentId: agent.id,
       marketId: market.id,
@@ -416,17 +531,18 @@ class AgentTradingSimulation {
       side,
       quantity,
       chainKey: CHAIN_KEY_MAIN,
+      userSignature: userSignature || undefined,
     });
 
     console.log(`Order response:`, JSON.stringify(orderResult, null, 2));
 
     if (orderResult.ok) {
       console.log(`Order submitted successfully!`);
-      
+
       // Get transaction hash from the order response
       let txHash: string | undefined;
       const orderBody = orderResult.body as any;
-      
+
       // Check for transaction hash in various locations
       if (orderBody?.transactionHash) {
         txHash = orderBody.transactionHash;
@@ -443,7 +559,7 @@ class AgentTradingSimulation {
           txHash = trade.txHash;
         }
       }
-      
+
       if (txHash) {
         console.log(`Transaction hash: ${txHash}`);
       } else {
@@ -476,7 +592,7 @@ class AgentTradingSimulation {
             functionName: 'balanceOf',
             args: [agent.walletAddress as `0x${string}`],
           });
-          
+
           const postTradeBalance = (balanceWeiAfter as bigint).toString();
           console.log(`Agent balance AFTER trade (blockchain): ${Number(postTradeBalance) / 1000000} USDC`);
           console.log(`Balance changed: ${Number(postTradeBalance) !== Number(preTradeBalance || "0") ? 'YES' : 'NO'}`);
@@ -546,7 +662,7 @@ class AgentTradingSimulation {
     results.forEach((result, index) => {
       const marketIdShort = result.marketId.slice(0, 8) + "...";
       const reasonShort = result.reason ? result.reason.slice(0, 80) + (result.reason.length > 80 ? "..." : "") : "";
-      
+
       console.log(`${index + 1}. ${marketIdShort} - ${result.action?.toUpperCase()}`);
       if (reasonShort) console.log(`   Reason: ${reasonShort}`);
       if (result.orderSubmitted) {
@@ -570,13 +686,13 @@ async function main(): Promise<void> {
     realTrading: true, // Always real trading on Sepolia
     backendUrl: process.env.BACKEND_URL || "http://localhost:4000",
   };
-  
+
   console.log("Configuration:");
   console.log(`   - Agent ID: ${simulationConfig.agentId}`);
   console.log(`   - Market Question IDs: ${simulationConfig.marketQuestionIds.length} provided`);
   console.log(`   - Real Trading: ${simulationConfig.realTrading ? "YES (Sepolia)" : "NO"}`);
   console.log(`   - Backend URL: ${simulationConfig.backendUrl}`);
-  
+
   const simulation = new AgentTradingSimulation(simulationConfig);
   await simulation.run();
 }

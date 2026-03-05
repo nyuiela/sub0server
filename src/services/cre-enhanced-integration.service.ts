@@ -42,11 +42,11 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
   const prisma = getPrismaClient();
   const isAgent = !!payload.agentId;
   const isSimulation = payload.chainKey === "tenderly";
-  
+
   try {
     // Step 1: Execute trade via CRE
     let creResult: CreExecuteUserResult | CreExecuteAgentResult;
-    
+
     if (isAgent) {
       creResult = await executeAgentTradeOnCre({
         agentId: payload.agentId!,
@@ -57,6 +57,7 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
         tradeCostUsdc: payload.tradeCostUsdc,
         nonce: payload.nonce,
         deadline: payload.deadline,
+        userSignature: payload.userSignature || ""
       });
     } else {
       creResult = await executeUserTradeOnCre({
@@ -71,7 +72,7 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
         userSignature: payload.userSignature!,
       });
     }
-    
+
     if (!creResult.ok) {
       return {
         success: false,
@@ -80,13 +81,13 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
         fundsDeducted: false,
       };
     }
-    
+
     // Step 2: Validate trade execution
     const validation = validateTradeExecution({
       txHash: creResult.txHash,
       chainKey: payload.chainKey,
     });
-    
+
     if (!validation.isValid && payload.chainKey === "main") {
       return {
         success: false,
@@ -95,7 +96,7 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
         fundsDeducted: false,
       };
     }
-    
+
     // Step 3: Create trade record
     await createEnhancedTrade({
       marketId: payload.marketId,
@@ -108,7 +109,7 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
       txHash: creResult.txHash,
       chainKey: payload.chainKey,
     });
-    
+
     // Step 4: Update balances (for main chain only)
     let fundsDeducted = false;
     if (payload.chainKey === "main" && creResult.txHash) {
@@ -128,19 +129,19 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
         // Don't fail the trade, but log the issue
       }
     }
-    
+
     // Step 5: For simulations, log that no actual funds were deducted
     if (payload.chainKey === "tenderly") {
       console.log(`Simulation trade executed: ${payload.agentId || payload.userId} - No actual funds deducted`);
     }
-    
+
     return {
       success: true,
       txHash: creResult.txHash,
       chainKey: payload.chainKey,
       fundsDeducted,
     };
-    
+
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
@@ -157,7 +158,7 @@ export async function executeEnhancedCreTrade(payload: EnhancedCreTradePayload):
  */
 async function getAddress(userId?: string, agentId?: string): Promise<string> {
   const prisma = getPrismaClient();
-  
+
   if (agentId) {
     const agent = await prisma.agent.findUnique({
       where: { id: agentId },
@@ -165,7 +166,7 @@ async function getAddress(userId?: string, agentId?: string): Promise<string> {
     });
     return agent?.walletAddress || agent?.publicKey || "unknown";
   }
-  
+
   if (userId) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -173,7 +174,7 @@ async function getAddress(userId?: string, agentId?: string): Promise<string> {
     });
     return user?.address || "unknown";
   }
-  
+
   return "unknown";
 }
 
@@ -185,7 +186,7 @@ export function getCreConfig(chainKey: "main" | "tenderly") {
     httpUrl: config.creHttpUrl,
     apiKey: config.creHttpApiKey,
   };
-  
+
   if (chainKey === "tenderly") {
     // For simulation, we might use different contract addresses
     // This is where you'd configure tenderly-specific settings
@@ -196,7 +197,7 @@ export function getCreConfig(chainKey: "main" | "tenderly") {
       // Note: CRE doesn't currently support tenderly, but this prepares for future support
     };
   }
-  
+
   return {
     ...baseConfig,
     simulationMode: false,
@@ -208,19 +209,19 @@ export function getCreConfig(chainKey: "main" | "tenderly") {
  */
 export function validateCreConfiguration(chainKey: "main" | "tenderly"): { valid: boolean; issues: string[] } {
   const issues: string[] = [];
-  
+
   if (!config.creHttpUrl?.trim()) {
     issues.push("CRE_HTTP_URL not configured");
   }
-  
+
   if (!config.creHttpApiKey?.trim()) {
     issues.push("CRE_HTTP_API_KEY not configured");
   }
-  
+
   if (chainKey === "tenderly") {
     issues.push("CRE does not currently support Tenderly simulation - trades will fail");
   }
-  
+
   return {
     valid: issues.length === 0,
     issues,
@@ -257,7 +258,7 @@ export async function handleCreTradeCallback(callbackData: {
   error?: string;
 }): Promise<void> {
   const prisma = getPrismaClient();
-  
+
   // Update trade record with callback status
   await prisma.trade.updateMany({
     where: {
@@ -271,10 +272,10 @@ export async function handleCreTradeCallback(callbackData: {
       // For now, we could use a separate table or add fields to Trade model
     },
   });
-  
+
   // Log the callback for debugging
   console.log(`CRE callback received: ${callbackData.txHash} - ${callbackData.status} (${callbackData.chainKey})`);
-  
+
   if (callbackData.status === "failed" && callbackData.error) {
     console.error(`CRE trade failed: ${callbackData.error}`);
     // Here you could implement rollback logic or notification system

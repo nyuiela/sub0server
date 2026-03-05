@@ -95,6 +95,7 @@ export interface ExecutedTrade {
   /** Maker (resting order); for position updates. */
   makerUserId?: string | null;
   makerAgentId?: string | null;
+  userSignature: string;
   executedAt: number;
 }
 

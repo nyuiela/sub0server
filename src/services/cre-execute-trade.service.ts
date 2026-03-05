@@ -23,6 +23,7 @@ export interface CreExecuteAgentPayload {
   tradeCostUsdc: string;
   nonce: string;
   deadline: string;
+  userSignature: string;
 }
 
 export interface CreExecuteAgentResult {
@@ -116,7 +117,7 @@ export async function executeUserMarketTradeOnCre(
  */
 export async function executeAgentTradeOnCre(payload: CreExecuteAgentPayload): Promise<CreExecuteAgentResult> {
   const body: Record<string, unknown> = {
-    action: "executeConfidentialTrade",
+    action: "order",
     agentId: payload.agentId,
     questionId: payload.questionId,
     outcomeIndex: payload.outcomeIndex,
@@ -125,6 +126,7 @@ export async function executeAgentTradeOnCre(payload: CreExecuteAgentPayload): P
     tradeCostUsdc: payload.tradeCostUsdc,
     nonce: payload.nonce,
     deadline: payload.deadline,
+    user: payload.userSignature
   };
   const result = await postToCre(body);
   if (!result.ok) return { ok: false, error: result.error };
