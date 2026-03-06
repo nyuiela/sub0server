@@ -170,7 +170,28 @@ fastify.get("/ws", { websocket: true }, (connection, req) => {
   }
 });
 
-fastify.get("/health", async () => ({ status: "ok" }));
+fastify.get("/", async () => ({
+  service: "sub0server",
+  sub0serverActive: true,
+  status: "active",
+  health: "ok",
+  version: "1.0.0",
+  timestamp: new Date().toISOString(),
+  endpoints: {
+    health: "/health",
+    healthCheck: "/health",
+    markets: "/api/markets",
+    agents: "/api/agents",
+    agentsPublic: "/api/agents/public",
+  },
+}));
+
+fastify.get("/health", async () => ({
+  status: "ok",
+  sub0serverActive: true,
+  service: "sub0server",
+  timestamp: new Date().toISOString(),
+}));
 
 fastify.decorate("prisma", getPrismaClient());
 await registerAgentEnqueueRoutes(fastify);

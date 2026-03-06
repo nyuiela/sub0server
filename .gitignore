@@ -1,7 +1,13 @@
 node_modules/
 .env
 *.env
+*.zip
 node_modules
 dist/
 .pnpm-store/
 ./pnpm-store/
+ *cre.zip
+ cre.zip
+ cre*.zip
+ *.zip
+ /cre.zip
