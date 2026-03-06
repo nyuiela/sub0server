@@ -7,7 +7,7 @@ The backend can run trigger-all on an interval itself. In `sub0server` `.env` se
 - `TRIGGER_ALL_CRON_ENABLED=true`
 - `TRIGGER_ALL_CRON_INTERVAL_MS=300000` (5 min; optional, default 300000)
 
-Then start the backend as usual (`pn dev` or `node dist/server.js`). No separate script or Docker cron needed.
+Then start thes backend as usual (`pn dev` or `node dist/server.js`). No separate script or Docker cron needed.
 
 ## Cron script (optional)
 
