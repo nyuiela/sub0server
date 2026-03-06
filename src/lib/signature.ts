@@ -5,7 +5,7 @@
  * )
  */
 
-import contractsData from "./contracts.json";
+import contractsData from "./contracts.json" with { type: "json" };
 // const contractsData = require("./contracts.json");
 
 type ContractsJson = {

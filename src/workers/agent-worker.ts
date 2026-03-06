@@ -53,8 +53,8 @@ async function submitOrderFromWorker(payload: {
     return { ok: false, status: 404, body: { error: "Agent not found" } };
   }
 
-  // Check if this is an agent order that needs signing
-  const isAgentOrder = payload.agentId && !payload.userId;
+  // Check if this is an agent order that needs signing (worker payload has agentId only)
+  const isAgentOrder = Boolean(payload.agentId);
   let userSignature = payload.userSignature;
 
   if (isAgentOrder && !userSignature) {

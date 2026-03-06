@@ -5,8 +5,10 @@ import { getAllUserBalances, getUserBalance } from "../services/user-balance.ser
 export async function registerUserBalanceRoutes(app: FastifyInstance): Promise<void> {
   // Get all user balances
   app.get("/api/user/balances", async (req: FastifyRequest, reply: FastifyReply) => {
-    const user = requireUser(req, reply);
-    if (!user) return;
+    const user = requireUser(req);
+    if (!user?.userId) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
 
     try {
       const balances = await getAllUserBalances(user.userId);
@@ -22,8 +24,10 @@ export async function registerUserBalanceRoutes(app: FastifyInstance): Promise<v
 
   // Get specific token balance
   app.get("/api/user/balances/:tokenAddress", async (req: FastifyRequest<{ Params: { tokenAddress: string } }>, reply: FastifyReply) => {
-    const user = requireUser(req, reply);
-    if (!user) return;
+    const user = requireUser(req);
+    if (!user?.userId) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
 
     const { tokenAddress } = req.params;
 

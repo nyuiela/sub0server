@@ -13,7 +13,7 @@ import {
 } from "../schemas/position.schema.js";
 import { Prisma } from "@prisma/client";
 import { getPublicClient } from "../services/agent-onboarding.service.js";
-import contracts from "../lib/contracts.json" assert { type: "json" };
+import contracts from "../lib/contracts.json" with { type: "json" };
 import { Abi } from "thirdweb/utils";
 import { USDC_DECIMALS } from "../lib/eip712-quote.js";
 
@@ -166,7 +166,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
         avgPrice: parsed.data.avgPrice,
         collateralLocked: parsed.data.collateralLocked,
       },
-      include: { market: { select: { id: true, name: true } } },
+      include: { market: { select: { id: true, name: true, outcomes: true } } },
     });
     await broadcastMarketUpdate({
       marketId: position.marketId,
@@ -186,7 +186,7 @@ export async function registerPositionRoutes(app: FastifyInstance): Promise<void
       .update({
         where: { id: req.params.id },
         data: parsed.data,
-        include: { market: { select: { id: true, name: true } } },
+        include: { market: { select: { id: true, name: true, outcomes: true } } },
       })
       .catch(() => null);
     if (!position) return reply.code(404).send({ error: "Position not found" });

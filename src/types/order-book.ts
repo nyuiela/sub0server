@@ -1,4 +1,4 @@
-import type { CreOrderPayload } from "./cre-order.js";
+import type { CreOrderPayload, AgentCrePayload } from "./cre-order.js";
 
 /**
  * Order side: BID (buy) or ASK (sell).
@@ -47,7 +47,7 @@ export interface EngineOrder {
   createdAt: number;
   userId?: string | null;
   agentId?: string | null;
-  crePayload?: CreOrderPayload | null;
+  crePayload?: CreOrderPayload | AgentCrePayload | null;
   /** "main" = live; "tenderly" = simulate. Set for agent orders. */
   chainKey?: string | null;
 }
@@ -67,7 +67,7 @@ export interface OrderInput {
   quantity: string | number;
   userId?: string | null;
   agentId?: string | null;
-  crePayload?: CreOrderPayload | null;
+  crePayload?: CreOrderPayload | AgentCrePayload | null;
   /** "main" | "tenderly" for agent orders. */
   chainKey?: string | null;
 }

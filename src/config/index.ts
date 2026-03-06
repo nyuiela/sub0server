@@ -1,4 +1,4 @@
-import contracts from "../lib/contracts.json" assert { type: "json" };
+import contracts from "../lib/contracts.json" with { type: "json" };
 const requiredEnv = (key: string): string => {
   const value = process.env[key];
   if (value === undefined || value === "") {

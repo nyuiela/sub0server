@@ -28,7 +28,7 @@ import {
   type OnchainMarketCreatedBatchInput,
   type AgentMarketsQueryInput,
 } from "../schemas/agent-markets.schema.js";
-import contracts from "../lib/contracts.json" assert { type: "json" };
+import contracts from "../lib/contracts.json" with { type: "json" };
 
 
 function serializeMarket(market: {

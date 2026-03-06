@@ -9,6 +9,7 @@
  * - Complete audit trail
  */
 
+import { Decimal } from "decimal.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import type { PrismaClient } from "@prisma/client";
 

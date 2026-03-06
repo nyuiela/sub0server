@@ -5,7 +5,7 @@
 
 import { config } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
-import contracts from "../lib/contracts.json" assert { type: "json" };
+import contracts from "../lib/contracts.json" with { type: "json" };
 import { PositionSide, PositionStatus } from "@prisma/client";
 
 /** Position.collateralLocked is Decimal(28,18): max integer part < 10^10. Cap to avoid overflow. */
