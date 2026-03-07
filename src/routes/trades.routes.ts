@@ -6,6 +6,7 @@ const tradesQuerySchema = z.object({
   marketId: z.string().optional(),
   userId: z.string().optional(),
   agentId: z.string().optional(),
+  chainKey: z.enum(["main", "tenderly"]).optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
   offset: z.coerce.number().min(0).default(0),
 });
@@ -20,7 +21,7 @@ export async function registerTradesRoutes(app: FastifyInstance): Promise<void> 
       return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
 
-    const { marketId, userId, agentId, limit, offset } = parsed.data;
+    const { marketId, userId, agentId, chainKey, limit, offset } = parsed.data;
     const prisma = getPrismaClient();
 
     try {
@@ -28,6 +29,10 @@ export async function registerTradesRoutes(app: FastifyInstance): Promise<void> 
         ...(marketId && { marketId }),
         ...(userId && { userId }),
         ...(agentId && { agentId }),
+        ...(chainKey === "tenderly" && { chainKey: "tenderly" }),
+        ...(chainKey === "main" && {
+          OR: [{ chainKey: "main" }, { chainKey: null }],
+        }),
       };
 
       const [trades, total] = await Promise.all([

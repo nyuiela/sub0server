@@ -25,7 +25,7 @@ export function getTenderlyChainConfig(): TenderlyChainConfig | null {
   const adminRpcUrl = process.env.TENDERLY_VIRTUAL_TESTNET_ADMIN_RPC?.trim();
   if (!rpcUrl || !adminRpcUrl) return null;
 
-  const chainId = Number(process.env.TENDERLY_CHAIN_ID?.trim() || "0") || 73571;
+  const chainId = Number(process.env.TENDERLY_CHAIN_ID?.trim() || "0") || 9998453;
   const name = optionalEnv("TENDERLY_CHAIN_NAME", "Virtual TestNet");
   const wsUrl = process.env.TENDERLY_VIRTUAL_TESTNET_WS?.trim() || undefined;
   const blockExplorerUrl = process.env.TENDERLY_EXPLORER_URL?.trim() || undefined;

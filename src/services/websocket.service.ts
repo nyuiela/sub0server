@@ -64,23 +64,23 @@ export class SocketManager {
   }
 
   private async subscribeRedis(): Promise<void> {
-    const sub = await getRedisSubscriber();
-    this.redisSub = sub;
-    await sub.subscribe(
-      BROADCAST_CHANNEL,
-      REDIS_CHANNELS.ORDER_BOOK_UPDATE,
-      REDIS_CHANNELS.TRADES,
-      REDIS_CHANNELS.MARKET_UPDATES,
-      REDIS_CHANNELS.AGENT_UPDATES,
-      // New enhanced channels
-      REDIS_CHANNELS.ACTIVITY_LOG,
-      REDIS_CHANNELS.POSITION_UPDATES,
-      REDIS_CHANNELS.USER_ASSET_CHANGES,
-      REDIS_CHANNELS.AI_ANALYSIS,
-      REDIS_CHANNELS.AGENT_MARKET_ACTIONS,
-      REDIS_CHANNELS.LMSR_PRICING
-    );
-    sub.on("message", (channel: string, message: string) => {
+    try {
+      const sub = await getRedisSubscriber();
+      this.redisSub = sub;
+      await sub.subscribe(
+        BROADCAST_CHANNEL,
+        REDIS_CHANNELS.ORDER_BOOK_UPDATE,
+        REDIS_CHANNELS.TRADES,
+        REDIS_CHANNELS.MARKET_UPDATES,
+        REDIS_CHANNELS.AGENT_UPDATES,
+        REDIS_CHANNELS.ACTIVITY_LOG,
+        REDIS_CHANNELS.POSITION_UPDATES,
+        REDIS_CHANNELS.USER_ASSET_CHANGES,
+        REDIS_CHANNELS.AI_ANALYSIS,
+        REDIS_CHANNELS.AGENT_MARKET_ACTIONS,
+        REDIS_CHANNELS.LMSR_PRICING
+      );
+      sub.on("message", (channel: string, message: string) => {
       try {
         if (channel === BROADCAST_CHANNEL) {
           const { room, payload, filters } = JSON.parse(message) as {
@@ -279,6 +279,10 @@ export class SocketManager {
         // ignore malformed
       }
     });
+    } catch (err) {
+      console.error("[SocketManager] Redis subscribe failed (OOM or unreachable). WebSocket real-time updates disabled. REST APIs will work.", err);
+      this.redisSub = null;
+    }
   }
 
   addSocket(socket: WebSocket, req: FastifyRequest): void {
