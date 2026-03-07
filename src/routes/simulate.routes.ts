@@ -468,26 +468,35 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         },
       });
 
+      /** Batch enqueue to avoid Redis OOM: many queue.add() in one burst can push Redis over maxmemory. */
+      const ENQUEUE_BATCH_SIZE = 25;
+      const ENQUEUE_BATCH_DELAY_MS = 80;
       const jobIds: string[] = [];
-      for (const market of marketsInRange) {
-        await prisma.agentEnqueuedMarket.create({
-          data: {
+      for (let i = 0; i < marketsInRange.length; i += ENQUEUE_BATCH_SIZE) {
+        const batch = marketsInRange.slice(i, i + ENQUEUE_BATCH_SIZE);
+        for (const market of batch) {
+          await prisma.agentEnqueuedMarket.create({
+            data: {
+              agentId,
+              marketId: market.id,
+              simulationId: simulation.id,
+              chainKey: CHAIN_KEY_TENDERLY,
+              simulateDateRangeStart: rangeStart,
+              simulateDateRangeEnd: rangeEnd,
+              tradeReason: "No reason provided",
+            },
+          });
+          const jobId = await enqueueAgentPredictionNow({
             agentId,
             marketId: market.id,
             simulationId: simulation.id,
             chainKey: CHAIN_KEY_TENDERLY,
-            simulateDateRangeStart: rangeStart,
-            simulateDateRangeEnd: rangeEnd,
-            tradeReason: "No reason provided",
-          },
-        });
-        const jobId = await enqueueAgentPredictionNow({
-          agentId,
-          marketId: market.id,
-          simulationId: simulation.id,
-          chainKey: CHAIN_KEY_TENDERLY,
-        });
-        jobIds.push(jobId);
+          });
+          jobIds.push(jobId);
+        }
+        if (i + ENQUEUE_BATCH_SIZE < marketsInRange.length) {
+          await new Promise((r) => setTimeout(r, ENQUEUE_BATCH_DELAY_MS));
+        }
       }
 
       return reply.send({
@@ -622,25 +631,33 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         });
         const shuffled = pool.slice().sort(() => Math.random() - 0.5);
         const toAdd = shuffled.slice(0, addMarkets);
-        for (const market of toAdd) {
-          await prisma.agentEnqueuedMarket.create({
-            data: {
+        const EXTEND_BATCH_SIZE = 25;
+        const EXTEND_BATCH_DELAY_MS = 80;
+        for (let i = 0; i < toAdd.length; i += EXTEND_BATCH_SIZE) {
+          const batch = toAdd.slice(i, i + EXTEND_BATCH_SIZE);
+          for (const market of batch) {
+            await prisma.agentEnqueuedMarket.create({
+              data: {
+                agentId: sim.agentId,
+                marketId: market.id,
+                simulationId: sim.id,
+                chainKey: CHAIN_KEY_TENDERLY,
+                simulateDateRangeStart: sim.dateRangeStart,
+                simulateDateRangeEnd: sim.dateRangeEnd,
+                tradeReason: "No reason provided",
+              },
+            });
+            await enqueueAgentPredictionNow({
               agentId: sim.agentId,
               marketId: market.id,
               simulationId: sim.id,
               chainKey: CHAIN_KEY_TENDERLY,
-              simulateDateRangeStart: sim.dateRangeStart,
-              simulateDateRangeEnd: sim.dateRangeEnd,
-              tradeReason: "No reason provided",
-            },
-          });
-          await enqueueAgentPredictionNow({
-            agentId: sim.agentId,
-            marketId: market.id,
-            simulationId: sim.id,
-            chainKey: CHAIN_KEY_TENDERLY,
-          });
-          addedCount += 1;
+            });
+            addedCount += 1;
+          }
+          if (i + EXTEND_BATCH_SIZE < toAdd.length) {
+            await new Promise((r) => setTimeout(r, EXTEND_BATCH_DELAY_MS));
+          }
         }
       }
       const newTotalDuration = sim.durationMinutes + addMin;

@@ -6,7 +6,7 @@
  * Onchain-created callbacks (CRE notifies backend after createMarket):
  * - Single: POST .../onchain-created (one market per request). Used when CRE fetches via GET (HTTP cap).
  * - Batch:  POST .../onchain-created-batch (body: { markets: [...] }). Used when backend sends markets in request body; CRE sends one batch with all results. Every callback item is applied; if getMarket is not yet visible we still store questionId+createMarketTxHash and the pending poll fills conditionId later.
- */
+ */ 
 
 import type { Hex } from "viem";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
