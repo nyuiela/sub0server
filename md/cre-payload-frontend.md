@@ -108,13 +108,13 @@ When CRE callbacks (POST `/api/cre/buy` or `/api/cre/sell`), the backend updates
 
 ## 4. Integration checklist
 
-| Task | How |
-|------|-----|
-| Show tx link for a trade | Use `TRADE_EXECUTED.payload.txHash` or `TRADE_EXECUTED.payload.crePayload?.txHash` (or first of `crePayload.txHashes`). |
-| Show tx link for an order | Use `order.crePayload.txHash` or first of `order.crePayload.txHashes`; update from `ORDER_CRE_PAYLOAD` when received. |
-| Handle late tx hash | Listen for `ORDER_CRE_PAYLOAD`; match by `orderId` and merge `crePayload` into the order in UI state. |
-| Show CRE errors | If `crePayload.errors` is non-empty, display a warning/error for that order or trade. |
-| Subscribe | Subscribe to room `market:{marketId}` to receive both `TRADE_EXECUTED` and `ORDER_CRE_PAYLOAD`. |
+| Task                      | How                                                                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Show tx link for a trade  | Use `TRADE_EXECUTED.payload.txHash` or `TRADE_EXECUTED.payload.crePayload?.txHash` (or first of `crePayload.txHashes`). |
+| Show tx link for an order | Use `order.crePayload.txHash` or first of `order.crePayload.txHashes`; update from `ORDER_CRE_PAYLOAD` when received.   |
+| Handle late tx hash       | Listen for `ORDER_CRE_PAYLOAD`; match by `orderId` and merge `crePayload` into the order in UI state.                   |
+| Show CRE errors           | If `crePayload.errors` is non-empty, display a warning/error for that order or trade.                                   |
+| Subscribe                 | Subscribe to room `market:{marketId}` to receive both `TRADE_EXECUTED` and `ORDER_CRE_PAYLOAD`.                         |
 
 ---
 
@@ -123,7 +123,7 @@ When CRE callbacks (POST `/api/cre/buy` or `/api/cre/sell`), the backend updates
 ```ts
 // Pseudocode
 function onOrderCrePayload(payload: OrderCrePayloadUpdatePayload) {
-  const order = orders.find(o => o.id === payload.orderId);
+  const order = orders.find((o) => o.id === payload.orderId);
   if (!order) return;
   order.crePayload = { ...order.crePayload, ...payload.crePayload };
   // Re-render row: show tx link from order.crePayload.txHash, errors from order.crePayload.errors
