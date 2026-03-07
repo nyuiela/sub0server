@@ -24,3 +24,21 @@ export interface CreOrderPayload {
 export interface AgentCrePayload {
   userSignature: string;
 }
+
+/**
+ * After CRE executes a trade, it POSTs to /api/cre/buy or /api/cre/sell with this shape.
+ * We merge it into order.crePayload so the order record has txHash/txHashes and any errors.
+ */
+export interface CreCallbackPayload {
+  questionId: string;
+  users?: string[];
+  outcomeIndex: number;
+  buy: boolean;
+  quantity: string;
+  tradeCostUsdc: string;
+  nonce: string;
+  deadline: string;
+  txHash?: string;
+  txHashes?: string[];
+  errors?: unknown[];
+}

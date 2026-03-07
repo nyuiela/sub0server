@@ -59,7 +59,9 @@ fastify.addHook("onRequest", async (request) => {
   const isCrePost =
     path === "/api/cre/markets/onchain-created" ||
     path === "/api/cre/markets/onchain-created-batch" ||
-    path === "/api/cre/agent-keys";
+    path === "/api/cre/agent-keys" ||
+    path === "/api/cre/buy" ||
+    path === "/api/cre/sell";
   if (request.method === "POST" && isCrePost) {
     const ct = request.headers["content-type"];
     if (!ct || String(ct).toLowerCase() === "undefined") {

@@ -43,3 +43,22 @@ export const creLmsrPricingResultSchema = z.object({
 });
 
 export type CreLmsrPricingResultInput = z.infer<typeof creLmsrPricingResultSchema>;
+
+/** POST /api/cre/buy or /api/cre/sell – CRE sends this after executing a trade (tx hash + quote fields). */
+export const creBuySellCallbackSchema = z.object({
+  questionId: z.string().min(1),
+  users: z.array(z.string()).optional(),
+  outcomeIndex: z.number().int().min(0),
+  buy: z.boolean(),
+  quantity: z.string().min(1),
+  tradeCostUsdc: z.string().min(1),
+  nonce: z.string().min(1),
+  deadline: z.string().min(1),
+  txHash: z.string().min(1).optional(),
+  txHashes: z.array(z.string().min(1)).optional(),
+  errors: z.array(z.unknown()).optional(),
+}).refine((data) => data.txHash != null || (data.txHashes != null && data.txHashes.length > 0), {
+  message: "Either txHash or non-empty txHashes is required",
+});
+
+export type CreBuySellCallbackInput = z.infer<typeof creBuySellCallbackSchema>;

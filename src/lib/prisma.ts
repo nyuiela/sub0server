@@ -6,10 +6,16 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
+const IDLE_TIMEOUT_MS = 30_000;
+const CONNECT_TIMEOUT_MS = 10_000;
+
 export function getPrismaClient(): PrismaClient {
   if (global.__prisma === undefined) {
     const adapter = new PrismaPg({
       connectionString: config.databaseUrl,
+      idleTimeoutMillis: IDLE_TIMEOUT_MS,
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+      max: 10,
     });
     global.__prisma = new PrismaClient({ adapter });
   }

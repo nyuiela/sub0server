@@ -15,11 +15,14 @@ import {
   creCreateWalletResultSchema,
   creAgentKeysSchema,
   creLmsrPricingResultSchema,
+  creBuySellCallbackSchema,
   type CreCreateWalletResultInput,
   type CreAgentKeysInput,
   type CreLmsrPricingResultInput,
+  type CreBuySellCallbackInput,
 } from "../schemas/cre-callback.schema.js";
 import { handleCreLmsrPricingCallback } from "../services/cre-lmsr-pricing.service.js";
+import { persistCreBuySellCallback } from "../services/cre-buy-sell-callback.service.js";
 
 export async function registerCreCallbackRoutes(app: FastifyInstance): Promise<void> {
   /** POST /api/internal/cre/create-wallet-result – store agent wallet address and optional CRE-only encrypted key. */
@@ -179,4 +182,37 @@ export async function registerCreCallbackRoutes(app: FastifyInstance): Promise<v
       });
     }
   );
+
+  const handleCreBuySellCallback = async (
+    req: FastifyRequest<{ Body: unknown }>,
+    reply: FastifyReply,
+    side: "BID" | "ASK"
+  ) => {
+    const parsed = creBuySellCallbackSchema.safeParse(req.body);
+    if (!parsed.success) {
+      req.log.warn({ validationError: parsed.error.flatten() }, `CRE ${side === "BID" ? "buy" : "sell"}: validation failed`);
+      return reply.code(400).send({ error: "Validation failed", details: parsed.error.flatten() });
+    }
+    const body = parsed.data as CreBuySellCallbackInput;
+    req.log.info(
+      { questionId: body.questionId, outcomeIndex: body.outcomeIndex, buy: body.buy, txHash: body.txHash, txHashes: body.txHashes },
+      `CRE ${side === "BID" ? "buy" : "sell"}: received callback`
+    );
+    const prisma = getPrismaClient();
+    const result = await persistCreBuySellCallback(prisma, body, side);
+    if (result.error && result.updated === 0) {
+      return reply.code(404).send({ error: result.error, updated: 0, orderIds: [] });
+    }
+    return reply.code(200).send({
+      success: true,
+      updated: result.updated,
+      orderIds: result.orderIds,
+    });
+  };
+
+  /** POST /api/cre/buy – CRE sends trade result (tx hash + quote fields) after executing a buy. Stored in order.crePayload. */
+  app.post<{ Body: unknown }>("/api/cre/buy", async (req, reply) => handleCreBuySellCallback(req, reply, "BID"));
+
+  /** POST /api/cre/sell – CRE sends trade result (tx hash + quote fields) after executing a sell. Stored in order.crePayload. */
+  app.post<{ Body: unknown }>("/api/cre/sell", async (req, reply) => handleCreBuySellCallback(req, reply, "ASK"));
 }

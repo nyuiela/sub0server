@@ -16,11 +16,15 @@
  *
  * Requires: Backend running, API_KEY in .env (or set). Markets must exist and be OPEN.
  * For each market: places a LIMIT BID, LIMIT ASK, then a signed MARKET BID.
+ * Decryption uses the same dotenv + agent-keys.service as agent-trading-simulation (AGENT_ENCRYPTION_SECRET or JWT_SECRET).
  */
 
-import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
-import { createWalletClient, http } from "viem";
+// Load environment first, same as agent-trading-simulation, so AGENT_ENCRYPTION_SECRET/JWT_SECRET is correct for decryption
+import { config } from "dotenv";
+config();
+
+import { createRequire } from "module";
+import { createPublicClient, createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 import { getPrismaClient } from "../lib/prisma.js";
@@ -28,24 +32,63 @@ import { decryptPrivateKey } from "../services/agent-keys.service.js";
 import { buildUserTradeTypedData } from "../lib/signature.js";
 import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 
-function loadEnv(): void {
-  const path = resolve(process.cwd(), ".env");
-  if (!existsSync(path)) return;
-  const content = readFileSync(path, "utf8");
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("#") || !trimmed) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx <= 0) continue;
-    const key = trimmed.slice(0, idx).trim();
-    let value = trimmed.slice(idx + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
-      value = value.slice(1, -1);
-    if (!(key in process.env)) process.env[key] = value;
-  }
-}
+const require = createRequire(import.meta.url);
+const contracts = require("../lib/contracts.json") as {
+  chainRpcUrl?: string;
+  contracts?: { usdc?: string; conditionalTokens?: string; predictionVault?: string };
+};
+const RPC_URL = process.env.CHAIN_RPC_URL || contracts.chainRpcUrl || "https://sepolia.drpc.org";
+const USDC_ADDRESS = contracts.contracts?.usdc as string | undefined;
+const CT_ADDRESS = contracts.contracts?.conditionalTokens as string | undefined;
+const PREDICTION_VAULT_ADDRESS = contracts.contracts?.predictionVault as string | undefined;
 
-loadEnv();
+const MAX_U256 = 2n ** 256n - 1n;
+
+const ERC20_ALLOWANCE_APPROVE_ABI = [
+  {
+    type: "function" as const,
+    name: "allowance",
+    inputs: [
+      { name: "owner", type: "address", internalType: "address" },
+      { name: "spender", type: "address", internalType: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view" as const,
+  },
+  {
+    type: "function" as const,
+    name: "approve",
+    inputs: [
+      { name: "spender", type: "address", internalType: "address" },
+      { name: "amount", type: "uint256", internalType: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    stateMutability: "nonpayable" as const,
+  },
+] as const;
+
+const ERC1155_APPROVAL_ABI = [
+  {
+    type: "function" as const,
+    name: "isApprovedForAll",
+    inputs: [
+      { name: "account", type: "address", internalType: "address" },
+      { name: "operator", type: "address", internalType: "address" },
+    ],
+    outputs: [{ name: "", type: "bool", internalType: "bool" }],
+    stateMutability: "view" as const,
+  },
+  {
+    type: "function" as const,
+    name: "setApprovalForAll",
+    inputs: [
+      { name: "operator", type: "address", internalType: "address" },
+      { name: "approved", type: "bool", internalType: "bool" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable" as const,
+  },
+] as const;
 
 const BACKEND_PORT = process.env.PORT ?? "4000";
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${BACKEND_PORT}`;
@@ -55,9 +98,8 @@ const INTERVAL_MS = Math.max(50000, Number(process.env.BID_ASK_TRADE_INTERVAL_MS
 const MARKETS_LIMIT = Math.max(1, Math.min(50, Number(process.env.BID_ASK_TRADE_MARKETS_LIMIT) || 10));
 const ORDER_DELAY_MS = Math.max(0, Number(process.env.BID_ASK_TRADE_ORDER_DELAY_MS) || 100000);
 const DEFAULT_OUTCOME_INDEX = 0;
-const LIMIT_BID_PRICE = "0.4";
+const LIMIT_PRICE = "0.45";
 const LIMIT_BID_QTY_USDC_6 = "50000000";
-const LIMIT_ASK_PRICE = "0.5";
 const LIMIT_ASK_QTY_USDC_6 = "30000000";
 const MARKET_BID_QTY_USDC_6 = "20000000";
 
@@ -200,6 +242,87 @@ function hasCompleteWallet(agent: AgentSigningIdentity): boolean {
   return Boolean(walletAddress && encryptedPrivateKey);
 }
 
+/**
+ * Check ERC20 (USDC) allowance and ERC1155 (CT) approval for the agent toward the prediction vault.
+ * If not allowed, send approve / setApprovalForAll and wait for receipts, then proceed.
+ */
+async function ensureAllowance(agent: AgentSigningIdentity): Promise<boolean> {
+  if (!USDC_ADDRESS || !CT_ADDRESS || !PREDICTION_VAULT_ADDRESS) {
+    log("Missing USDC, CT or predictionVault address; skipping allowance check", "fail");
+    return false;
+  }
+  if (!agent.walletAddress?.trim() || !agent.encryptedPrivateKey?.trim()) {
+    return false;
+  }
+  let privateKey: string;
+  try {
+    privateKey = decryptPrivateKey(agent.encryptedPrivateKey);
+  } catch (e) {
+    log(`Allowance check: could not decrypt agent key: ${e instanceof Error ? e.message : String(e)}`, "fail");
+    return false;
+  }
+  const account = privateKeyToAccount(privateKey as `0x${string}`);
+  const publicClient = createPublicClient({
+    chain: sepolia,
+    transport: http(RPC_URL),
+  });
+  const walletClient = createWalletClient({
+    account,
+    chain: sepolia,
+    transport: http(RPC_URL),
+  });
+  const owner = agent.walletAddress as Hex;
+  const spender = PREDICTION_VAULT_ADDRESS as Hex;
+
+  const allowance = await publicClient.readContract({
+    address: USDC_ADDRESS as Hex,
+    abi: ERC20_ALLOWANCE_APPROVE_ABI,
+    functionName: "allowance",
+    args: [owner, spender],
+  });
+  if (allowance < MAX_U256) {
+    log("ERC20 allowance insufficient; sending approve(max)...", "info");
+    try {
+      const hash = await walletClient.writeContract({
+        address: USDC_ADDRESS as Hex,
+        abi: ERC20_ALLOWANCE_APPROVE_ABI,
+        functionName: "approve",
+        args: [spender, MAX_U256],
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      log(`USDC approve confirmed (tx ${hash.slice(0, 10)}...)`, "ok");
+    } catch (e) {
+      log(`USDC approve failed: ${e instanceof Error ? e.message : String(e)}`, "fail");
+      return false;
+    }
+  }
+
+  const isApproved = await publicClient.readContract({
+    address: CT_ADDRESS as Hex,
+    abi: ERC1155_APPROVAL_ABI,
+    functionName: "isApprovedForAll",
+    args: [owner, spender],
+  });
+  if (!isApproved) {
+    log("ERC1155 not approved for vault; sending setApprovalForAll(true)...", "info");
+    try {
+      const hash = await walletClient.writeContract({
+        address: CT_ADDRESS as Hex,
+        abi: ERC1155_APPROVAL_ABI,
+        functionName: "setApprovalForAll",
+        args: [spender, true],
+      });
+      await publicClient.waitForTransactionReceipt({ hash });
+      log(`CT setApprovalForAll confirmed (tx ${hash.slice(0, 10)}...)`, "ok");
+    } catch (e) {
+      log(`CT setApprovalForAll failed: ${e instanceof Error ? e.message : String(e)}`, "fail");
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function signMarketOrder(params: {
   agent: AgentSigningIdentity;
   questionId: string;
@@ -323,14 +446,20 @@ async function runMarket(marketId: string, agent: AgentSigningIdentity): Promise
 
   const outcomeIndex = DEFAULT_OUTCOME_INDEX;
 
-  log("Placing LIMIT BID @ 0.40 qty 50 (agent liquidity)...", "info");
+  const allowanceOk = await ensureAllowance(agent);
+  if (!allowanceOk) {
+    log("Allowance check/approve failed; skipping market", "fail");
+    return false;
+  }
+
+  log(`Placing LIMIT BID @ ${LIMIT_PRICE} qty 50 (agent liquidity)...`, "info");
   const bidRes = await placeOrder({
     agentId: agent.id,
     marketId,
     outcomeIndex,
     side: "BID",
     type: "LIMIT",
-    price: LIMIT_BID_PRICE,
+    price: LIMIT_PRICE,
     quantity: LIMIT_BID_QTY_USDC_6,
   });
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
@@ -341,14 +470,14 @@ async function runMarket(marketId: string, agent: AgentSigningIdentity): Promise
   const bidData = bidRes.data as OrderApiResponse;
   log(`BID placed orderId=${bidData.orderId ?? "?"} status=${bidData.status ?? "?"} trades=${(bidData.trades ?? []).length}`, "ok");
 
-  log("Placing LIMIT ASK @ 0.50 qty 30 (agent liquidity)...", "info");
+  log(`Placing LIMIT ASK @ ${LIMIT_PRICE} qty 30 (agent liquidity)...`, "info");
   const askRes = await placeOrder({
     agentId: agent.id,
     marketId,
     outcomeIndex,
     side: "ASK",
     type: "LIMIT",
-    price: LIMIT_ASK_PRICE,
+    price: LIMIT_PRICE,
     quantity: LIMIT_ASK_QTY_USDC_6,
   });
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
