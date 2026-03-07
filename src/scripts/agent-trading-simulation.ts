@@ -10,7 +10,6 @@
 import { config } from "dotenv";
 config();
 
-import { config as appConfig } from "../config/index.js";
 import { getPrismaClient } from "../lib/prisma.js";
 import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 import { runTradingAnalysis } from "../services/agent-trading-analysis.service.js";
@@ -21,12 +20,12 @@ import { buildUserTradeTypedData } from "../lib/signature.js";
 import { decryptPrivateKey } from "../services/agent-keys.service.js";
 
 // EDIT THESE VALUES FOR YOUR SIMULATION
-const AGENT_ID = "fb888532-72ca-475d-bf38-9035dadecc11"; // Change to your agent ID
+const AGENT_ID = "2b707682-801d-4df0-a285-5d96b171e294"; // Change to your agent ID
 
 const MARKET_QUESTION_IDS = [
-  "0x3ea53cc69f3c990ebe65a7df09221bce0ffbb22c852b502865216a627ce5697f",
-  "0x18680f5c93c53690715ced2d0cb22bef40076309b26dba8dd362e89c2c0c76f1",
-  "0x56a227b3d515a0705db97829173a6a4a372c6dec19e4b83496e1cee4141636f1",
+  "0xae46ffcaa7dd743c3518155e198e2e3b760c4633536fa052f6db45a4396867c1",
+  // "0x18680f5c93c53690715ced2d0cb22bef40076309b26dba8dd362e89c2c0c76f1",
+  // "0x56a227b3d515a0705db97829173a6a4a372c6dec19e4b83496e1cee4141636f1",
 ];
 
 interface SimulationConfig {
@@ -48,6 +47,17 @@ interface TradingResult {
   error?: string;
 }
 
+function isQuestionIdFormat(value: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
+interface SignedTradeQuote {
+  userSignature: string;
+  tradeCostUsdc: string;
+  nonce: string;
+  deadline: string;
+}
+
 // Import submitOrderFromWorker by creating a local copy
 async function submitOrderFromWorker(payload: {
   agentId: string;
@@ -55,8 +65,11 @@ async function submitOrderFromWorker(payload: {
   outcomeIndex: number;
   side: "BID" | "ASK";
   quantity: string;
+  tradeCostUsdc: string;
+  nonce: string;
+  deadline: string;
   chainKey?: string | null;
-  userSignature?: string;
+  userSignature: string;
 }): Promise<{ ok: boolean; status: number; body?: unknown }> {
   const apiKey = process.env.API_KEY;
   if (!apiKey?.trim()) {
@@ -70,12 +83,11 @@ async function submitOrderFromWorker(payload: {
     type: "MARKET",
     quantity: payload.quantity,
     agentId: payload.agentId,
-    userSignature: payload.userSignature
+    userSignature: payload.userSignature,
+    tradeCostUsdc: payload.tradeCostUsdc,
+    nonce: payload.nonce,
+    deadline: payload.deadline,
   };
-  // Add userSignature if provided
-  if (payload.userSignature) {
-    body.userSignature = payload.userSignature;
-  }
   if (payload.chainKey != null && payload.chainKey !== CHAIN_KEY_MAIN) {
     body.chainKey = payload.chainKey;
   } else {
@@ -123,7 +135,7 @@ class AgentTradingSimulation {
     side: "BID" | "ASK",
     quantity: string,
     maxCostUsdc: string
-  ): Promise<string | null> {
+  ): Promise<SignedTradeQuote | null> {
     try {
       // Check if we have the private key
       if (!agent.encryptedPrivateKey) {
@@ -148,8 +160,8 @@ class AgentTradingSimulation {
       }
 
       // Generate nonce and deadline
-      const nonce = BigInt(Date.now());
-      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes
+      const nonce = BigInt(Date.now()).toString();
+      const deadline = String(Math.floor(Date.now() / 1000) + 300); // 5 minutes
 
       // Build EIP-712 typed data
       const typedData = buildUserTradeTypedData({
@@ -158,8 +170,8 @@ class AgentTradingSimulation {
         buy: side === "BID",
         quantity,
         maxCostUsdc,
-        nonce: nonce.toString(),
-        deadline,
+        nonce,
+        deadline: Number(deadline),
       });
 
       // Create wallet client for signing
@@ -178,7 +190,12 @@ class AgentTradingSimulation {
       });
 
       console.log(`✅ Order signed with EIP-712 signature`);
-      return signature;
+      return {
+        userSignature: signature,
+        tradeCostUsdc: maxCostUsdc,
+        nonce,
+        deadline,
+      };
     } catch (error) {
       console.error("❌ Failed to sign order:", error);
       return null;
@@ -192,7 +209,14 @@ class AgentTradingSimulation {
     try {
       return decryptPrivateKey(encryptedKey);
     } catch (error) {
-      console.error("Failed to decrypt private key:", error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.toLowerCase().includes("unable to authenticate data")) {
+        console.error(
+          "Failed to decrypt private key: AGENT_ENCRYPTION_SECRET/JWT_SECRET does not match the key used to encrypt this agent wallet"
+        );
+      } else {
+        console.error("Failed to decrypt private key:", error);
+      }
       return null;
     }
   }
@@ -263,10 +287,14 @@ class AgentTradingSimulation {
   }
 
   private async getMarketInformation() {
+    const references = this.config.marketQuestionIds;
     const markets = await this.prisma.market.findMany({
       where: {
-        questionId: { in: this.config.marketQuestionIds },
         status: "OPEN",
+        OR: [
+          { id: { in: references } },
+          { questionId: { in: references } },
+        ],
       },
       select: {
         id: true,
@@ -439,20 +467,45 @@ class AgentTradingSimulation {
 
     // Sign the order with agent's private key
     const maxCostUsdc = quantity; // Use quantity as max cost for now
-    const userSignature = await this.signOrder(
+    const marketQuestionId = market.questionId?.trim() || (isQuestionIdFormat(market.id) ? market.id : "");
+    if (!marketQuestionId) {
+      return {
+        marketId: market.id,
+        action: decision.action,
+        reason: decision.reason,
+        outcomeIndex,
+        quantity,
+        orderSubmitted: false,
+        orderStatus: "FAILED",
+        error: "Market has no questionId; cannot sign order",
+      };
+    }
+
+    const signedQuote = await this.signOrder(
       agent,
-      market.questionId,
+      marketQuestionId,
       outcomeIndex,
       side,
       quantity,
       maxCostUsdc
     );
 
-    if (userSignature) {
+    if (signedQuote) {
       console.log(`✅ Order signed successfully`);
-      console.log(`Signature: ${userSignature.slice(0, 20)}...${userSignature.slice(-20)}`);
+      console.log(
+        `Signature: ${signedQuote.userSignature.slice(0, 20)}...${signedQuote.userSignature.slice(-20)}`
+      );
     } else {
-      console.log(`⚠️ Could not sign order, proceeding without signature...`);
+      return {
+        marketId: market.id,
+        action: decision.action,
+        reason: decision.reason,
+        outcomeIndex,
+        quantity,
+        orderSubmitted: false,
+        orderStatus: "FAILED",
+        error: "Could not sign order; refusing to submit unsigned trade",
+      };
     }
 
     // First, ensure market has liquidity
@@ -530,8 +583,11 @@ class AgentTradingSimulation {
       outcomeIndex,
       side,
       quantity,
+      tradeCostUsdc: signedQuote.tradeCostUsdc,
+      nonce: signedQuote.nonce,
+      deadline: signedQuote.deadline,
       chainKey: CHAIN_KEY_MAIN,
-      userSignature: userSignature || undefined,
+      userSignature: signedQuote.userSignature,
     });
 
     console.log(`Order response:`, JSON.stringify(orderResult, null, 2));
@@ -541,21 +597,21 @@ class AgentTradingSimulation {
 
       // Get transaction hash from the order response
       let txHash: string | undefined;
-      const orderBody = orderResult.body as any;
+      const orderBody = orderResult.body as Record<string, unknown> | undefined;
 
       // Check for transaction hash in various locations
-      if (orderBody?.transactionHash) {
+      if (typeof orderBody?.transactionHash === "string") {
         txHash = orderBody.transactionHash;
-      } else if (orderBody?.hash) {
+      } else if (typeof orderBody?.hash === "string") {
         txHash = orderBody.hash;
-      } else if (orderBody?.trades?.length > 0) {
+      } else if (Array.isArray(orderBody?.trades) && orderBody.trades.length > 0) {
         // Check in trades array for filled orders
-        const trade = orderBody.trades[0];
-        if (trade?.transactionHash) {
+        const trade = orderBody.trades[0] as Record<string, unknown> | undefined;
+        if (typeof trade?.transactionHash === "string") {
           txHash = trade.transactionHash;
-        } else if (trade?.hash) {
+        } else if (typeof trade?.hash === "string") {
           txHash = trade.hash;
-        } else if (trade?.txHash) {
+        } else if (typeof trade?.txHash === "string") {
           txHash = trade.txHash;
         }
       }
@@ -565,9 +621,10 @@ class AgentTradingSimulation {
       } else {
         console.log(`No transaction hash found in order response`);
         console.log(`Order body keys:`, Object.keys(orderBody || {}));
-        if (orderBody?.trades?.length > 0) {
-          console.log(`Trade keys:`, Object.keys(orderBody.trades[0] || {}));
-          console.log(`First trade details:`, JSON.stringify(orderBody.trades[0], null, 2));
+        if (Array.isArray(orderBody?.trades) && orderBody.trades.length > 0) {
+          const firstTrade = orderBody.trades[0] as Record<string, unknown>;
+          console.log(`Trade keys:`, Object.keys(firstTrade));
+          console.log(`First trade details:`, JSON.stringify(firstTrade, null, 2));
         }
         txHash = "order-submitted-backend";
       }

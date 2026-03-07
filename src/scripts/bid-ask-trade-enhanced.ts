@@ -281,6 +281,54 @@ async function getMarket(marketId: string): Promise<{ name?: string; outcomes?: 
   return data as { name?: string; outcomes?: unknown[]; questionId?: string; conditionId?: string };
 }
 
+function isQuestionIdFormat(value: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(value);
+}
+
+async function resolveMarketByIdOrQuestionId(
+  marketRef: string
+): Promise<{
+  id: string;
+  name?: string;
+  outcomes?: unknown[];
+  questionId?: string;
+  conditionId?: string;
+} | null> {
+  const direct = await getMarket(marketRef);
+  if (direct) {
+    return {
+      id: marketRef,
+      name: direct.name,
+      outcomes: direct.outcomes,
+      questionId: direct.questionId,
+      conditionId: direct.conditionId,
+    };
+  }
+
+  if (!isQuestionIdFormat(marketRef)) return null;
+
+  const { status, data } = await fetchApi(`/api/markets?status=OPEN&limit=100`);
+  if (status !== 200) return null;
+  const rows = (data as { data?: Array<Record<string, unknown>> }).data ?? [];
+  const match = rows.find((row) => {
+    const rowQuestionId = typeof row.questionId === "string" ? row.questionId : "";
+    return rowQuestionId.toLowerCase() === marketRef.toLowerCase();
+  });
+  if (!match) return null;
+
+  const resolvedId = typeof match.id === "string" ? match.id : "";
+  if (!resolvedId) return null;
+  const resolved = await getMarket(resolvedId);
+  if (!resolved) return null;
+  return {
+    id: resolvedId,
+    name: resolved.name,
+    outcomes: resolved.outcomes,
+    questionId: resolved.questionId ?? marketRef,
+    conditionId: resolved.conditionId,
+  };
+}
+
 // Backend order placement (existing)
 async function placeBackendOrder(params: {
   marketId: string;
@@ -305,51 +353,29 @@ async function placeBackendOrder(params: {
 async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
   log(`\n--- Market ${marketId} (${useCre ? "CRE" : "Backend"}) ---`, "info");
 
-  let market: { name?: string; outcomes?: unknown[]; questionId?: string; conditionId?: string } | null = null;
-  let questionId: string;
+  let market: { id: string; name?: string; outcomes?: unknown[]; questionId?: string; conditionId?: string } | null = null;
+  let questionId = "";
   let conditionId: string = "0x0000000000000000000000000000000000000000000000000000000000000000";
+  let resolvedMarketId = marketId;
 
-  if (useCre) {
-    // For CRE mode, if marketId looks like a questionId (starts with 0x and 66 chars), use it directly
-    if (marketId.startsWith("0x") && marketId.length === 66) {
-      questionId = marketId;
-      // Get market details from backend using questionId
-      const { status, data } = await fetchApi(`/api/markets?questionId=${questionId}&limit=1`);
-      if (status === 200 && data) {
-        const list = data as { data?: { id?: string; name?: string; outcomes?: unknown[]; conditionId?: string }[] };
-        const items = list.data ?? [];
-        if (items.length > 0) {
-          market = items[0];
-          conditionId = market.conditionId ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
-        }
-      }
-    } else {
-      // Try to get market by backend ID
-      market = await getMarket(marketId);
-      questionId = market?.questionId ?? marketId;
-      conditionId = market?.conditionId ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
-    }
-
-    // If still no market found, create minimal info for CRE trading
-    if (!market) {
-      market = { name: `CRE Market ${questionId.slice(0, 10)}...`, outcomes: [{}, {}] };
-      conditionId = "0x0000000000000000000000000000000000000000000000000000000000000000";
-    }
-  } else {
-    // Backend mode - get market by backend ID
-    market = await getMarket(marketId);
-    if (!market) {
-      log(`Market not found: ${marketId}`, "fail");
-      return false;
-    }
-    questionId = market.questionId ?? marketId;
-    conditionId = market.conditionId ?? "0x0000000000000000000000000000000000000000000000000000000000000000";
+  market = await resolveMarketByIdOrQuestionId(marketId);
+  if (!market) {
+    log(`Market not found by id/questionId: ${marketId}`, "fail");
+    return false;
   }
+  resolvedMarketId = market.id;
+  questionId = market.questionId?.trim() || (isQuestionIdFormat(marketId) ? marketId : "");
+  if (!questionId) {
+    log(`Market ${resolvedMarketId} has no questionId; cannot proceed`, "fail");
+    return false;
+  }
+  conditionId = market.conditionId ?? conditionId;
 
-  const name = market.name ?? marketId;
+  const name = market.name ?? resolvedMarketId;
   const outcomeCount = Array.isArray(market.outcomes) ? market.outcomes.length : 2;
 
   log(`Market: ${name} (outcomes: ${outcomeCount})`, "info");
+  log(`MarketId: ${resolvedMarketId}`, "info");
   log(`QuestionId: ${questionId}`, "info");
   log(`ConditionId: ${conditionId}`, "info");
 
@@ -456,7 +482,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
     // Backend API Trading (existing)
     log("Placing Backend LIMIT BID @ 0.40 qty 50...", "info");
     const bidRes = await placeBackendOrder({
-      marketId,
+      marketId: resolvedMarketId,
       outcomeIndex,
       side: "BID",
       type: "LIMIT",
@@ -473,7 +499,7 @@ async function runMarket(marketId: string, useCre: boolean): Promise<boolean> {
 
     log("Placing Backend LIMIT ASK @ 0.50 qty 30...", "info");
     const askRes = await placeBackendOrder({
-      marketId,
+      marketId: resolvedMarketId,
       outcomeIndex,
       side: "ASK",
       type: "LIMIT",

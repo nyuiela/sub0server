@@ -29,16 +29,20 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "price is required for LIMIT orders" });
     }
     console.log("raw.price", raw.price);
-    // tbd 
-    const price = raw.price;
 
     const prisma = getPrismaClient();
     const market = await prisma.market.findUnique({
       where: { id: raw.marketId },
-      select: { outcomes: true, questionId: true, conditionId: true },
+      select: { id: true, outcomes: true, questionId: true, conditionId: true },
     });
-    if (!market) return reply.code(404).send({ error: "Market not found" });
-    const outcomes = market.outcomes as unknown[];
+    const resolvedMarket =
+      market ??
+      (await prisma.market.findFirst({
+        where: { questionId: raw.marketId },
+        select: { id: true, outcomes: true, questionId: true, conditionId: true },
+      }));
+    if (!resolvedMarket) return reply.code(404).send({ error: "Market not found" });
+    const outcomes = resolvedMarket.outcomes as unknown[];
     const outcomeCount = Array.isArray(outcomes) ? outcomes.length : 0;
     if (raw.outcomeIndex >= outcomeCount) {
       return reply.code(400).send({
@@ -56,38 +60,55 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
     const agentId = isApiKey ? (raw.agentId ?? undefined) : undefined;
 
     const isUserOrder = userId != null && userId !== "" && (agentId == null || agentId === "");
-    if (isUserOrder && (!market.questionId || !market.conditionId)) {
+    if (isUserOrder && (!resolvedMarket.questionId || !resolvedMarket.conditionId)) {
       return reply.code(400).send({
         error: "Market has no questionId/conditionId; CRE execution requires them for user orders",
       });
     }
 
+    const signedUserSignature = raw.userSignature?.trim();
+    const signedTradeCostUsdc = raw.tradeCostUsdc?.trim();
+    const signedNonce = raw.nonce?.trim();
+    const signedDeadline = raw.deadline?.trim();
+    const hasSignedQuoteFields = Boolean(
+      signedUserSignature && signedTradeCostUsdc && signedNonce && signedDeadline
+    );
+
+    const isAgentMarketOrder = type === "MARKET" && agentId != null && agentId !== "";
+    if (isAgentMarketOrder && !hasSignedQuoteFields) {
+      return reply.code(400).send({
+        error:
+          "Agent MARKET orders require userSignature, tradeCostUsdc, nonce, and deadline for CRE execution",
+      });
+    }
+
     let crePayload: CreOrderPayload | AgentCrePayload | undefined;
-    if (isUserOrder && raw.userSignature && raw.tradeCostUsdc != null && raw.nonce != null && raw.deadline != null && market.questionId && market.conditionId) {
+    if (hasSignedQuoteFields && resolvedMarket.questionId && resolvedMarket.conditionId) {
       crePayload = {
-        questionId: market.questionId,
-        conditionId: market.conditionId,
+        questionId: resolvedMarket.questionId,
+        conditionId: resolvedMarket.conditionId,
         outcomeIndex: raw.outcomeIndex,
         buy: raw.side === "BID",
         quantity: raw.quantity as string,
-        tradeCostUsdc: raw.tradeCostUsdc,
-        nonce: raw.nonce,
-        deadline: raw.deadline,
-        userSignature: raw.userSignature,
+        tradeCostUsdc: signedTradeCostUsdc as string,
+        nonce: signedNonce as string,
+        deadline: signedDeadline as string,
+        userSignature: signedUserSignature as string,
       };
     } else if (agentId != null && agentId !== "" && raw.userSignature?.trim()) {
       crePayload = { userSignature: raw.userSignature.trim() };
     }
 
+    const submittedPrice = raw.price != null && raw.price !== "" ? String(raw.price) : "0";
     const orderId = randomUUID();
     const chainKey = raw.chainKey ?? null;
     const input = {
       id: orderId,
-      marketId: raw.marketId,
+      marketId: resolvedMarket.id,
       outcomeIndex: raw.outcomeIndex,
       side: raw.side,
       type,
-      price: String(price),
+      price: submittedPrice,
       quantity: raw.quantity,
       userId,
       agentId,
@@ -95,7 +116,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
       chainKey,
     };
 
-    if (type === "MARKET" && isUserOrder && crePayload && "questionId" in crePayload) {
+    if (type === "MARKET" && crePayload && "questionId" in crePayload) {
       try {
         const creResult = await executeUserMarketTradeOnCre(crePayload as CreOrderPayload, raw.side);
         if (!creResult.ok) {
@@ -123,17 +144,19 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           }
         }
         
-        const qtyStr = String(raw.quantity);
-        // const priceStr = new Decimal(crePayload.tradeCostUsdc).div(1e6).div(qtyStr).toFixed(18);
+        const qtyDecimal = new Decimal(String(raw.quantity));
+        const executedPrice = qtyDecimal.gt(0)
+          ? new Decimal(crePayload.tradeCostUsdc).div(qtyDecimal).toString()
+          : submittedPrice;
         const executedAt = Date.now();
-        const tradeId = `trade-market-cre-${raw.marketId}-${raw.outcomeIndex}-${executedAt}-${randomUUID().slice(0, 8)}`;
+        const tradeId = `trade-market-cre-${resolvedMarket.id}-${raw.outcomeIndex}-${executedAt}-${randomUUID().slice(0, 8)}`;
         const order: EngineOrder = {
           id: orderId,
-          marketId: raw.marketId,
+          marketId: resolvedMarket.id,
           outcomeIndex: raw.outcomeIndex,
           side: raw.side,
           type: "MARKET",
-          price: price!.toString(),
+          price: executedPrice,
           quantity: crePayload.quantity,
           remainingQty: "0",
           status: "FILLED",
@@ -145,9 +168,9 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         };
         const trade: ExecutedTrade = {
           id: tradeId,
-          marketId: raw.marketId,
+          marketId: resolvedMarket.id,
           outcomeIndex: raw.outcomeIndex,
-          price: price!.toString(),
+          price: executedPrice,
           quantity: crePayload.quantity,
           makerOrderId: "contract",
           takerOrderId: orderId,
@@ -161,7 +184,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         await enqueueOrderAndTradesForPersistence(order, [trade]);
         const redis = await getRedisPublisher();
         await redis.publish(REDIS_CHANNELS.TRADES, JSON.stringify({ trade }));
-        await redis.publish(REDIS_CHANNELS.MARKET_UPDATES, JSON.stringify({ marketId: raw.marketId, reason: "orderbook" }));
+        await redis.publish(REDIS_CHANNELS.MARKET_UPDATES, JSON.stringify({ marketId: resolvedMarket.id, reason: "orderbook" }));
         return reply.code(201).send({
           orderId,
           type: "MARKET",
@@ -169,7 +192,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           trades: [{ ...trade }],
           txHash: creResult.txHash,
           snapshot: {
-            marketId: raw.marketId,
+            marketId: resolvedMarket.id,
             outcomeIndex: raw.outcomeIndex,
             bids: [],
             asks: [],

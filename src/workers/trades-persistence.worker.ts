@@ -283,10 +283,47 @@ function tradeCostUsdcForFill(quantity: string, price: string): string {
   return new Decimal(quantity).times(price).toString();
 }
 
-function getAgentSignatureFromPayload(payload: unknown): string | null {
+interface AgentSignedQuoteFromPayload {
+  userSignature: string;
+  tradeCostUsdc?: string;
+  nonce?: string;
+  deadline?: string;
+}
+
+function getAgentSignedQuoteFromPayload(payload: unknown): AgentSignedQuoteFromPayload | null {
   if (payload == null || typeof payload !== "object") return null;
-  const sig = (payload as { userSignature?: string }).userSignature;
-  return typeof sig === "string" && sig.trim() !== "" ? sig.trim() : null;
+  const raw = payload as {
+    userSignature?: string;
+    tradeCostUsdc?: string;
+    nonce?: string;
+    deadline?: string;
+  };
+
+  const userSignature =
+    typeof raw.userSignature === "string" && raw.userSignature.trim() !== ""
+      ? raw.userSignature.trim()
+      : null;
+  if (!userSignature) return null;
+
+  const tradeCostUsdc =
+    typeof raw.tradeCostUsdc === "string" && raw.tradeCostUsdc.trim() !== ""
+      ? raw.tradeCostUsdc.trim()
+      : undefined;
+  const nonce =
+    typeof raw.nonce === "string" && raw.nonce.trim() !== ""
+      ? raw.nonce.trim()
+      : undefined;
+  const deadline =
+    typeof raw.deadline === "string" && raw.deadline.trim() !== ""
+      ? raw.deadline.trim()
+      : undefined;
+
+  return {
+    userSignature,
+    tradeCostUsdc,
+    nonce,
+    deadline,
+  };
 }
 
 /**
@@ -307,8 +344,8 @@ async function executeCreTrades(
     }
   }
 
-  const deadline = String(Math.floor(Date.now() / 1000) + 300);
-  const nonce = "0";
+  const fallbackDeadline = String(Math.floor(Date.now() / 1000) + 300);
+  const fallbackNonce = "0";
 
   for (const t of trades) {
     const market = await prisma.market.findUnique({
@@ -318,17 +355,17 @@ async function executeCreTrades(
     const questionId = market?.questionId?.trim();
     if (!questionId) continue;
 
-    const tradeCostUsdc = tradeCostUsdcForFill(t.quantity, t.price);
+    const fillTradeCostUsdc = tradeCostUsdcForFill(t.quantity, t.price);
     const buy = t.side === "BID";
 
     if (t.agentId) {
-      const takerSig =
+      const takerQuote =
         order?.agentId === t.agentId && t.takerOrderId === order?.id
-          ? getAgentSignatureFromPayload(order.crePayload)
+          ? getAgentSignedQuoteFromPayload(order.crePayload)
           : null;
       const agentSignature = t.userSignature?.trim() && t.userSignature !== "signature not added 1"
         ? t.userSignature
-        : takerSig;
+        : takerQuote?.userSignature;
       if (agentSignature) {
         const result = await executeAgentTradeOnCre({
           agentId: t.agentId,
@@ -336,9 +373,9 @@ async function executeCreTrades(
           outcomeIndex: t.outcomeIndex,
           buy,
           quantity: t.quantity,
-          tradeCostUsdc,
-          nonce,
-          deadline,
+          tradeCostUsdc: takerQuote?.tradeCostUsdc ?? fillTradeCostUsdc,
+          nonce: takerQuote?.nonce ?? fallbackNonce,
+          deadline: takerQuote?.deadline ?? fallbackDeadline,
           userSignature: agentSignature,
         });
         if (!result.ok) {
@@ -350,18 +387,18 @@ async function executeCreTrades(
     }
 
     if (t.makerAgentId) {
-      let makerSig: string | null = null;
+      let makerQuote: AgentSignedQuoteFromPayload | null = null;
       const makerOrder = await prisma.order.findUnique({
         where: { id: t.makerOrderId },
         select: { crePayload: true, agentId: true },
       });
       if (makerOrder?.agentId === t.makerAgentId && makerOrder.crePayload != null) {
-        makerSig = getAgentSignatureFromPayload(makerOrder.crePayload);
+        makerQuote = getAgentSignedQuoteFromPayload(makerOrder.crePayload);
       }
       const agentSignature =
         t.userSignature?.trim() && t.userSignature !== "agent signature not added 2"
           ? t.userSignature
-          : makerSig;
+          : makerQuote?.userSignature;
       if (agentSignature) {
         const result = await executeAgentTradeOnCre({
           agentId: t.makerAgentId,
@@ -369,9 +406,9 @@ async function executeCreTrades(
           outcomeIndex: t.outcomeIndex,
           buy: !buy,
           quantity: t.quantity,
-          tradeCostUsdc,
-          nonce,
-          deadline,
+          tradeCostUsdc: makerQuote?.tradeCostUsdc ?? fillTradeCostUsdc,
+          nonce: makerQuote?.nonce ?? fallbackNonce,
+          deadline: makerQuote?.deadline ?? fallbackDeadline,
           userSignature: agentSignature,
         });
         if (!result.ok) {

@@ -18,6 +18,18 @@ function isGrokModel(model: string): boolean {
   return model.startsWith("grok-");
 }
 
+function isRecoverableProviderError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("429") ||
+    m.includes("rate limit") ||
+    m.includes("resource has been exhausted") ||
+    m.includes("monthly spending limit") ||
+    m.includes("no grok/xai api key configured") ||
+    m.includes("no gemini trading key configured")
+  );
+}
+
 export interface SimulationContext {
   /** Evaluate market as of this date (ISO). Agent must not use information after this. */
   asOfDate: string;
@@ -239,17 +251,40 @@ export async function runTradingAnalysis(ctx: AgentMarketContext): Promise<Tradi
   const effectiveModel = (ctx.model?.trim() || DEFAULT_MODEL).toLowerCase();
   const prompt = buildPrompt(ctx);
 
+  const withDebug = (decision: TradingDecision, fullResponse: string): TradingDecision => ({
+    ...decision,
+    fullResponse,
+    prompt,
+  });
+
   try {
     let text: string;
     let outcomeText: string;
     if (isGrokModel(effectiveModel)) {
-      const result = await callGrokTrading(ctx, effectiveModel);
-      text = result.text;
-      outcomeText = result.outcomeText;
+      try {
+        const result = await callGrokTrading(ctx, effectiveModel);
+        text = result.text;
+        outcomeText = result.outcomeText;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!isRecoverableProviderError(msg)) throw err;
+        const fallback = await callGeminiTrading(ctx, DEFAULT_MODEL);
+        text = fallback.text;
+        outcomeText = fallback.outcomeText;
+      }
     } else if (isGeminiModel(effectiveModel)) {
-      const result = await callGeminiTrading(ctx, effectiveModel);
-      text = result.text;
-      outcomeText = result.outcomeText;
+      try {
+        const result = await callGeminiTrading(ctx, effectiveModel);
+        text = result.text;
+        outcomeText = result.outcomeText;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!isRecoverableProviderError(msg)) throw err;
+        const fallbackModel = config.grokModel || "grok-3-mini";
+        const fallback = await callGrokTrading(ctx, fallbackModel);
+        text = fallback.text;
+        outcomeText = fallback.outcomeText;
+      }
     } else {
       const result = await callGeminiTrading(ctx, DEFAULT_MODEL);
       text = result.text;
@@ -257,22 +292,26 @@ export async function runTradingAnalysis(ctx: AgentMarketContext): Promise<Tradi
     }
     
     const decision = parseTradingResponse(text, outcomeText, ctx);
-    
-    // Add full response and prompt to decision
-    decision.fullResponse = text;
-    decision.prompt = prompt;
-    
-    return decision;
+    return withDebug(decision, text);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("No Gemini trading key") || message.includes("No Grok/XAI")) {
-      return { 
-        action: "skip", 
+    if (
+      message.includes("No Gemini trading key") ||
+      message.includes("No Grok/XAI") ||
+      isRecoverableProviderError(message)
+    ) {
+      return {
+        action: "skip",
         reason: message,
         fullResponse: `Error: ${message}`,
-        prompt: prompt
+        prompt,
       };
     }
-    throw err;
+    return {
+      action: "skip",
+      reason: `Trading analysis failed: ${message}`,
+      fullResponse: `Error: ${message}`,
+      prompt,
+    };
   }
 }

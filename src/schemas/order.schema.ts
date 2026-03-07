@@ -5,7 +5,7 @@ const orderTypeEnum = z.enum(["LIMIT", "MARKET", "IOC"]);
 
 export const orderSubmitSchema = z
   .object({
-    marketId: z.string().uuid(),
+    marketId: z.union([z.string().uuid(), z.string().regex(/^0x[a-fA-F0-9]{64}$/)]),
     outcomeIndex: z.number().int().min(0),
     side: orderSideEnum,
     type: orderTypeEnum,

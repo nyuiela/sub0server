@@ -15,11 +15,18 @@
  *   BID_ASK_TRADE_ORDER_DELAY_MS (delay between orders in same market, default 500).
  *
  * Requires: Backend running, API_KEY in .env (or set). Markets must exist and be OPEN.
- * For each market: places a LIMIT BID, LIMIT ASK, then an optional crossing order to generate a trade.
+ * For each market: places a LIMIT BID, LIMIT ASK, then a signed MARKET BID.
  */
 
 import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
+import { createWalletClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { sepolia } from "viem/chains";
+import { getPrismaClient } from "../lib/prisma.js";
+import { decryptPrivateKey } from "../services/agent-keys.service.js";
+import { buildUserTradeTypedData } from "../lib/signature.js";
+import { CHAIN_KEY_MAIN } from "../types/agent-chain.js";
 
 function loadEnv(): void {
   const path = resolve(process.cwd(), ".env");
@@ -43,11 +50,60 @@ loadEnv();
 const BACKEND_PORT = process.env.PORT ?? "4000";
 const BASE_URL = process.env.BASE_URL ?? `http://localhost:${BACKEND_PORT}`;
 const API_KEY = process.env.API_KEY ?? "";
+const AGENT_ID = process.env.BID_ASK_TRADE_AGENT_ID ?? process.env.AGENT_ID ?? "";
 const INTERVAL_MS = Math.max(50000, Number(process.env.BID_ASK_TRADE_INTERVAL_MS) || 60_000);
 const MARKETS_LIMIT = Math.max(1, Math.min(50, Number(process.env.BID_ASK_TRADE_MARKETS_LIMIT) || 10));
 const ORDER_DELAY_MS = Math.max(0, Number(process.env.BID_ASK_TRADE_ORDER_DELAY_MS) || 100000);
+const DEFAULT_OUTCOME_INDEX = 0;
+const LIMIT_BID_PRICE = "0.4";
+const LIMIT_BID_QTY_USDC_6 = "50000000";
+const LIMIT_ASK_PRICE = "0.5";
+const LIMIT_ASK_QTY_USDC_6 = "30000000";
+const MARKET_BID_QTY_USDC_6 = "20000000";
 
 let shutdown = false;
+const prisma = getPrismaClient();
+
+interface MarketSummary {
+  id?: string;
+}
+
+interface MarketsResponse {
+  data?: MarketSummary[];
+}
+
+interface MarketDetailResponse {
+  id?: string;
+  name?: string | null;
+  outcomes?: unknown[];
+  questionId?: string | null;
+  conditionId?: string | null;
+}
+
+interface AgentSigningIdentity {
+  id: string;
+  name: string | null;
+  walletAddress: string | null;
+  encryptedPrivateKey: string | null;
+}
+
+interface SignedTradeQuote {
+  userSignature: string;
+  tradeCostUsdc: string;
+  nonce: string;
+  deadline: string;
+}
+
+interface OrderApiResponse {
+  orderId?: string;
+  status?: string;
+  trades?: Array<{ price?: string; quantity?: string }>;
+  txHash?: string;
+}
+
+function isQuestionIdFormat(value: string): boolean {
+  return /^0x[a-fA-F0-9]{64}$/.test(value);
+}
 
 function log(msg: string, level: "info" | "ok" | "fail" = "info"): void {
   const prefix = level === "ok" ? "[OK] " : level === "fail" ? "[FAIL] " : "";
@@ -101,45 +157,144 @@ function parseArgs(): { continuous: boolean; marketIds: string[] } {
 async function fetchOpenMarkets(): Promise<string[]> {
   const { status, data } = await fetchApi(`/api/markets?status=OPEN&limit=${MARKETS_LIMIT}`);
   if (status !== 200) return [];
-  const list = data as { data?: { id?: string }[] };
+  const list = data as MarketsResponse;
   const items = list.data ?? [];
   return items.map((m) => m.id).filter((id): id is string => typeof id === "string");
 }
 
-async function getMarket(marketId: string): Promise<{ name?: string; outcomes?: unknown[] } | null> {
+async function getMarket(marketId: string): Promise<MarketDetailResponse | null> {
   const { status, data } = await fetchApi(`/api/markets/${marketId}`);
   if (status !== 200) return null;
-  return data as { name?: string; outcomes?: unknown[] };
+  return data as MarketDetailResponse;
 }
 
-async function getAgentId(): Promise<string> {
-  const { status, data } = await fetchApi(`/api/agents`);
-  if (status !== 200) return "";
-  const agents = data as { id?: string }[];
-  return agents[0].id ?? "";
+async function getAgentIdentity(): Promise<AgentSigningIdentity | null> {
+  if (AGENT_ID) {
+    const agent = await prisma.agent.findUnique({
+      where: { id: AGENT_ID },
+      select: {
+        id: true,
+        name: true,
+        walletAddress: true,
+        encryptedPrivateKey: true,
+      },
+    });
+    return agent;
+  }
+
+  const agent = await prisma.agent.findFirst({
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      name: true,
+      walletAddress: true,
+      encryptedPrivateKey: true,
+    },
+  });
+  return agent;
+}
+
+function hasCompleteWallet(agent: AgentSigningIdentity): boolean {
+  const walletAddress = agent.walletAddress?.trim();
+  const encryptedPrivateKey = agent.encryptedPrivateKey?.trim();
+  return Boolean(walletAddress && encryptedPrivateKey);
+}
+
+async function signMarketOrder(params: {
+  agent: AgentSigningIdentity;
+  questionId: string;
+  outcomeIndex: number;
+  side: "BID" | "ASK";
+  quantity: string;
+  maxCostUsdc: string;
+}): Promise<SignedTradeQuote | null> {
+  try {
+    if (!params.agent.encryptedPrivateKey?.trim() || !params.agent.walletAddress?.trim()) return null;
+
+    const decryptedPrivateKey = decryptPrivateKey(params.agent.encryptedPrivateKey);
+    const account = privateKeyToAccount(decryptedPrivateKey as `0x${string}`);
+    if (account.address.toLowerCase() !== params.agent.walletAddress.toLowerCase()) {
+      log(
+        `Agent wallet mismatch: derived ${account.address} vs stored ${params.agent.walletAddress}`,
+        "fail"
+      );
+      return null;
+    }
+
+    const nonce = BigInt(Date.now()).toString();
+    const deadline = String(Math.floor(Date.now() / 1000) + 300);
+    const typedData = buildUserTradeTypedData({
+      questionId: params.questionId,
+      outcomeIndex: params.outcomeIndex,
+      buy: params.side === "BID",
+      quantity: params.quantity,
+      maxCostUsdc: params.maxCostUsdc,
+      nonce,
+      deadline: Number(deadline),
+    });
+
+    const walletClient = createWalletClient({
+      account,
+      chain: sepolia,
+      transport: http(process.env.CHAIN_RPC_URL || "https://sepolia.drpc.org"),
+    });
+    const userSignature = await walletClient.signTypedData({
+      domain: typedData.domain,
+      types: typedData.types,
+      primaryType: typedData.primaryType,
+      message: typedData.message,
+    });
+
+    return {
+      userSignature,
+      tradeCostUsdc: params.maxCostUsdc,
+      nonce,
+      deadline,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes("unable to authenticate data")) {
+      log(
+        "Failed to decrypt agent private key (auth mismatch). Check AGENT_ENCRYPTION_SECRET/JWT_SECRET matches the one used when this agent wallet was created.",
+        "fail"
+      );
+    } else {
+      log(`Failed to sign market order: ${message}`, "fail");
+    }
+    return null;
+  }
 }
 
 async function placeOrder(params: {
+  agentId: string;
   marketId: string;
   outcomeIndex: number;
   side: "BID" | "ASK";
   type: "LIMIT" | "MARKET";
   price?: string;
   quantity: string;
+  signedQuote?: SignedTradeQuote;
 }): Promise<{ status: number; data: unknown }> {
   const body: Record<string, unknown> = {
+    agentId: params.agentId,
     marketId: params.marketId,
     outcomeIndex: params.outcomeIndex,
     side: params.side,
     type: params.type,
     quantity: params.quantity,
-
+    chainKey: CHAIN_KEY_MAIN,
   };
   if (params.type === "LIMIT" && params.price != null) body.price = params.price;
+  if (params.type === "MARKET" && params.signedQuote) {
+    body.userSignature = params.signedQuote.userSignature;
+    body.tradeCostUsdc = params.signedQuote.tradeCostUsdc;
+    body.nonce = params.signedQuote.nonce;
+    body.deadline = params.signedQuote.deadline;
+  }
   return fetchApi("/api/orders", { method: "POST", body });
 }
 
-async function runMarket(marketId: string): Promise<boolean> {
+async function runMarket(marketId: string, agent: AgentSigningIdentity): Promise<boolean> {
   log(`\n--- Market ${marketId} ---`, "info");
 
   const market = await getMarket(marketId);
@@ -151,59 +306,93 @@ async function runMarket(marketId: string): Promise<boolean> {
   const outcomeCount = Array.isArray(market.outcomes) ? market.outcomes.length : 2;
   log(`Market: ${name} (outcomes: ${outcomeCount})`, "info");
 
-  const outcomeIndex = 0;
+  const apiQuestionId = market.questionId?.trim();
+  const questionId =
+    apiQuestionId && apiQuestionId.length > 0
+      ? apiQuestionId
+      : isQuestionIdFormat(marketId)
+        ? marketId
+        : "";
+  if (!questionId) {
+    log(
+      `Market ${marketId} has no questionId in API response and input is not a questionId; cannot sign market trade`,
+      "fail"
+    );
+    return false;
+  }
 
-  log("Placing LIMIT BID @ 0.40 qty 50...", "info");
+  const outcomeIndex = DEFAULT_OUTCOME_INDEX;
+
+  log("Placing LIMIT BID @ 0.40 qty 50 (agent liquidity)...", "info");
   const bidRes = await placeOrder({
+    agentId: agent.id,
     marketId,
     outcomeIndex,
     side: "BID",
     type: "LIMIT",
-    price: "0.4",
-    quantity: "50000000",
+    price: LIMIT_BID_PRICE,
+    quantity: LIMIT_BID_QTY_USDC_6,
   });
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
   if (bidRes.status !== 201) {
     log(`BID failed ${bidRes.status}: ${JSON.stringify(bidRes.data)}`, "fail");
     return false;
   }
-  const bidData = bidRes.data as { orderId?: string; status?: string; trades?: unknown[] };
+  const bidData = bidRes.data as OrderApiResponse;
   log(`BID placed orderId=${bidData.orderId ?? "?"} status=${bidData.status ?? "?"} trades=${(bidData.trades ?? []).length}`, "ok");
 
-  log("Placing LIMIT ASK @ 0.50 qty 30...", "info");
+  log("Placing LIMIT ASK @ 0.50 qty 30 (agent liquidity)...", "info");
   const askRes = await placeOrder({
+    agentId: agent.id,
     marketId,
     outcomeIndex,
     side: "ASK",
     type: "LIMIT",
-    price: "0.5",
-    quantity: "30000000",
+    price: LIMIT_ASK_PRICE,
+    quantity: LIMIT_ASK_QTY_USDC_6,
   });
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
   if (askRes.status !== 201) {
     log(`ASK failed ${askRes.status}: ${JSON.stringify(askRes.data)}`, "fail");
     return false;
   }
-  const askData = askRes.data as { orderId?: string; status?: string; trades?: unknown[] };
+  const askData = askRes.data as OrderApiResponse;
   log(`ASK placed orderId=${askData.orderId ?? "?"} status=${askData.status ?? "?"} trades=${(askData.trades ?? []).length}`, "ok");
 
-  log("Placing LIMIT BID @ 0.50 qty 20 (crosses ASK to generate trade)...", "info");
+  log("Signing and placing MARKET BID qty 20...", "info");
+  const signedQuote = await signMarketOrder({
+    agent,
+    questionId,
+    outcomeIndex,
+    side: "BID",
+    quantity: MARKET_BID_QTY_USDC_6,
+    maxCostUsdc: MARKET_BID_QTY_USDC_6,
+  });
+  if (!signedQuote) {
+    log("Could not sign market order; skipping market trade", "fail");
+    return false;
+  }
+
   if (ORDER_DELAY_MS > 0) await sleep(ORDER_DELAY_MS);
-  const crossRes = await placeOrder({
+  const marketRes = await placeOrder({
+    agentId: agent.id,
     marketId,
     outcomeIndex,
     side: "BID",
-    type: "LIMIT",
-    price: "0.5",
-    quantity: "20000000",
+    type: "MARKET",
+    quantity: MARKET_BID_QTY_USDC_6,
+    signedQuote,
   });
-  if (crossRes.status !== 201) {
-    log(`Cross BID failed ${crossRes.status}: ${JSON.stringify(crossRes.data)}`, "fail");
+  if (marketRes.status !== 201) {
+    log(`MARKET BID failed ${marketRes.status}: ${JSON.stringify(marketRes.data)}`, "fail");
     return true;
   }
-  const crossData = crossRes.data as { orderId?: string; status?: string; trades?: { price: string; quantity: string }[] };
-  const trades = crossData.trades ?? [];
-  log(`Cross BID placed orderId=${crossData.orderId ?? "?"} status=${crossData.status ?? "?"} trades=${trades.length}`, "ok");
+  const marketData = marketRes.data as OrderApiResponse;
+  const trades = marketData.trades ?? [];
+  log(
+    `MARKET BID placed orderId=${marketData.orderId ?? "?"} status=${marketData.status ?? "?"} trades=${trades.length} txHash=${marketData.txHash ?? "?"}`,
+    "ok"
+  );
   if (trades.length > 0) {
     trades.forEach((t, i) => log(`  trade ${i + 1}: price=${t.price} qty=${t.quantity}`, "info"));
   }
@@ -224,10 +413,22 @@ function setupShutdown(): void {
 async function runCycle(marketIds: string[], cycleIndex: number): Promise<number> {
   if (marketIds.length === 0) return 0;
   log(`\n[Cycle ${cycleIndex}] ${marketIds.length} market(s)`, "info");
+
+  const agent = await getAgentIdentity();
+  if (!agent) {
+    log("No agent found. Set BID_ASK_TRADE_AGENT_ID or create at least one agent.", "fail");
+    return 0;
+  }
+  if (!hasCompleteWallet(agent)) {
+    log(`Agent ${agent.id} has incomplete wallet data; cannot sign market orders`, "fail");
+    return 0;
+  }
+  log(`Using agent ${agent.name ?? agent.id} (${agent.id})`, "info");
+
   let okCount = 0;
   for (const marketId of marketIds) {
     if (shutdown) break;
-    const ok = await runMarket(marketId);
+    const ok = await runMarket(marketId, agent);
     if (ok) okCount++;
   }
   return okCount;
