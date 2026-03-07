@@ -10,6 +10,10 @@ export interface AgentMarketSuggestion {
   outcomeSlotCount?: number;
   /** Optional short context/description; stored on Market.context. */
   context?: string;
+  /** Optional source URL for resolution; stored on Market.sourceUrl. */
+  sourceUrl?: string | null;
+  /** Optional settlement rules for agent deliberation; stored on Market.settlementRules. */
+  settlementRules?: string | null;
 }
 
 /**
@@ -31,6 +35,10 @@ export interface CreCreateMarketPayload {
   marketId?: string;
   /** Optional short context; stored on Market.context (not sent to CRE). */
   context?: string;
+  /** Optional source URL; stored on Market.sourceUrl (not sent to CRE). */
+  sourceUrl?: string | null;
+  /** Optional settlement rules; stored on Market.settlementRules (not sent to CRE). */
+  settlementRules?: string | null;
 }
 
 /**
