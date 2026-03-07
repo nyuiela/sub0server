@@ -433,7 +433,7 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
           return reply.code(400).send({ error: payResult.error });
         }
       }
-      const marketsInRange = await prisma.market.findMany({
+      const pool = await prisma.market.findMany({
         where: {
           questionId: { not: null },
           OR: [
@@ -446,10 +446,12 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
             },
           ],
         },
-        orderBy: { resolutionDate: "desc" },
-        take: maxMarketsForCap,
-        select: { id: true, status: true, },
+        select: { id: true, status: true },
       });
+      const shuffled = pool
+        .slice()
+        .sort(() => Math.random() - 0.5);
+      const marketsInRange = shuffled.slice(0, maxMarketsForCap);
 
       const simulation = await prisma.simulation.create({
         data: {

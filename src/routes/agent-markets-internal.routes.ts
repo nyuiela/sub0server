@@ -155,7 +155,11 @@ async function createMarketFromOnchainResult(
       const initialLiquidity = initialVolume;
       await prisma.market.update({
         where: { id: updated.id },
-        data: { volume: initialVolume, liquidity: initialLiquidity },
+        data: {
+          volume: initialVolume,
+          liquidity: initialLiquidity,
+          liquiditySeeded: seeded,
+        },
       });
       await broadcastMarketUpdate({
         marketId: updated.id,

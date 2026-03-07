@@ -23,8 +23,11 @@ import type {
   CreCreateMarketPayload,
   CreDraftPayloadForCre,
 } from "../types/agent-markets.js";
+import { createRequire } from "module";
 import { Hex } from "thirdweb";
-import contracts from "../lib/contracts.json" with { type: "json" };
+
+const require = createRequire(import.meta.url);
+const contracts = require("../lib/contracts.json") as { contracts?: { usdc?: string } };
 
 const DEFAULT_DURATION_SECONDS = 86400;
 const DEFAULT_OUTCOME_SLOT_COUNT = 2;
@@ -284,6 +287,14 @@ function parseSuggestionsFromText(text: string): AgentMarketSuggestion[] {
     if (typeof q !== "string" || !q.trim()) continue;
     const raw = item as Record<string, unknown>;
     const ctx = typeof raw.context === "string" ? raw.context.trim().slice(0, 256) : undefined;
+    const sourceUrl =
+      typeof raw.sourceUrl === "string" && raw.sourceUrl.trim().length > 0
+        ? raw.sourceUrl.trim().slice(0, 2048)
+        : undefined;
+    const settlementRules =
+      typeof raw.settlementRules === "string" && raw.settlementRules.trim().length > 0
+        ? raw.settlementRules.trim().slice(0, 4096)
+        : undefined;
     suggestions.push({
       question: q.trim().slice(0, MAX_QUESTION_LENGTH),
       context: ctx && ctx.length > 0 ? ctx : undefined,
@@ -291,6 +302,8 @@ function parseSuggestionsFromText(text: string): AgentMarketSuggestion[] {
         typeof raw.durationSeconds === "number" ? (raw.durationSeconds as number) : undefined,
       outcomeSlotCount:
         typeof raw.outcomeSlotCount === "number" ? (raw.outcomeSlotCount as number) : undefined,
+      sourceUrl: sourceUrl ?? null,
+      settlementRules: settlementRules ?? null,
     });
   }
   return suggestions;
@@ -334,6 +347,8 @@ function toCrePayload(
     creatorAddress: config.platformCreatorAddress,
     amountUsdc: config.agentMarketAmountUsdc,
     context: suggestion.context,
+    sourceUrl: suggestion.sourceUrl ?? undefined,
+    settlementRules: suggestion.settlementRules ?? undefined,
   };
 }
 
@@ -506,7 +521,10 @@ function marketImageUrl(seed: string): string {
 
 /**
  * Creates draft markets in the DB from agent suggestions (no conditionId/questionId).
- * Call this to refill the draft pool; then send drafts to CRE via getDraftMarketsForCre.
+ * Drafts are created with questionId and conditionId null so getDraftMarketsForCre returns them
+ * and they are sent to CRE with marketId. When CRE creates on chain and runPoll/callback runs,
+ * the draft is updated with conditionId, questionId, outcomePositionIds, liquidity; context,
+ * imageUrl, sourceUrl, settlementRules are preserved.
  */
 export async function createDraftMarketsFromAgents(
   count: number
@@ -519,11 +537,21 @@ export async function createDraftMarketsFromAgents(
   let created = 0;
   for (const p of payloads) {
     const qid = computeQuestionId(p.question, p.creatorAddress, p.oracle);
-    const existing = await prisma.market.findFirst({
+    const existingByQuestionId = await prisma.market.findFirst({
       where: { questionId: qid },
       select: { id: true },
     });
-    if (existing) continue;
+    if (existingByQuestionId) continue;
+    const existingDraft = await prisma.market.findFirst({
+      where: {
+        questionId: null,
+        name: p.question,
+        creatorAddress: p.creatorAddress,
+        oracleAddress: p.oracle,
+      },
+      select: { id: true },
+    });
+    if (existingDraft) continue;
     const resolutionDate = new Date(Date.now() + p.duration * 1000);
     const outcomes =
       p.outcomeSlotCount === 2
@@ -531,7 +559,6 @@ export async function createDraftMarketsFromAgents(
         : (Array.from({ length: p.outcomeSlotCount }, (_, i) => `Outcome ${i + 1}`) as object);
     const market = await prisma.market.create({
       data: {
-        id: qid, // Use questionId as market ID to prevent duplicates
         name: p.question,
         creatorAddress: p.creatorAddress,
         oracleAddress: p.oracle,
@@ -540,9 +567,11 @@ export async function createDraftMarketsFromAgents(
         collateralToken,
         platform: "NATIVE",
         volume: 0,
-        conditionId: qid, // Set conditionId to questionId as well
-        questionId: qid, // Set questionId to computed questionId
+        conditionId: null,
+        questionId: null,
         context: p.context ?? null,
+        sourceUrl: p.sourceUrl ?? null,
+        settlementRules: p.settlementRules ?? null,
       },
     });
     await prisma.market.update({

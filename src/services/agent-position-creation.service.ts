@@ -1,17 +1,58 @@
 /**
  * Agent Position Creation Service
- * 
+ *
  * This service bridges the gap between agent trading decisions and position management.
  * It ensures that when an agent decides to trade, a position is created with:
  * - Proper reasoning from the agent's decision
  * - Outcome string mapping (not just index)
  * - Correct side (LONG/SHORT) based on decision
  * - Proper status tracking
+ *
+ * When a position is created or updated, the service broadcasts to POSITION_UPDATES
+ * so WebSocket clients (simulation and main trading) can refetch positions automatically.
  */
 
 import { getPrismaClient } from "../lib/prisma.js";
+import { getRedisPublisher } from "../lib/redis.js";
+import { REDIS_CHANNELS } from "../config/index.js";
+import type { PositionUpdatedPayload } from "../types/websocket-events.js";
 import type { TradingDecision } from "./agent-trading-analysis.service.js";
 import type { AgentMarketContext } from "./agent-trading-analysis.service.js";
+
+async function broadcastPositionUpdate(payload: PositionUpdatedPayload): Promise<void> {
+  try {
+    const redis = await getRedisPublisher();
+    await redis.publish(REDIS_CHANNELS.POSITION_UPDATES, JSON.stringify({ position: payload }));
+  } catch (err) {
+    console.error("Failed to broadcast POSITION_UPDATES:", err);
+  }
+}
+
+function toPositionPayload(
+  positionId: string,
+  marketId: string,
+  agentId: string,
+  outcomeIndex: number,
+  side: "LONG" | "SHORT",
+  size: string,
+  avgPrice: string,
+  status: "OPEN" | "CLOSED",
+  reason: PositionUpdatedPayload["reason"]
+): PositionUpdatedPayload {
+  const now = new Date().toISOString();
+  return {
+    positionId,
+    marketId,
+    agentId,
+    outcomeIndex,
+    side: side === "LONG" ? "long" : "short",
+    size,
+    avgPrice,
+    status: status === "OPEN" ? "open" : "closed",
+    updatedAt: now,
+    reason,
+  };
+}
 
 export interface AgentPositionCreationInput {
   agentId: string;
@@ -94,7 +135,6 @@ export async function createOrUpdateAgentPosition(input: AgentPositionCreationIn
   if (decision.action === "buy") {
     // Buy action: Create or update LONG position
     if (existingPosition && existingPosition.side === "LONG") {
-      // Update existing LONG position
       const newLocked = existingPosition.collateralLocked.plus(quantity);
       await prisma.position.update({
         where: { id: existingPosition.id },
@@ -105,9 +145,21 @@ export async function createOrUpdateAgentPosition(input: AgentPositionCreationIn
           updatedAt: new Date(),
         },
       });
+      await broadcastPositionUpdate(
+        toPositionPayload(
+          existingPosition.id,
+          marketId,
+          agentId,
+          outcomeIndex,
+          "LONG",
+          newLocked.toString(),
+          existingPosition.avgPrice.toString(),
+          "OPEN",
+          "increased"
+        )
+      );
     } else {
-      // Create new LONG position
-      await prisma.position.create({
+      const created = await prisma.position.create({
         data: {
           agentId,
           marketId,
@@ -117,18 +169,30 @@ export async function createOrUpdateAgentPosition(input: AgentPositionCreationIn
           contractPositionId,
           side: "LONG",
           status: "OPEN",
-          avgPrice: "0", // Will be updated when trade executes
+          avgPrice: "0",
           collateralLocked: quantity,
           isAmm: false,
           chainKey,
           tradeReason: reason,
         },
       });
+      await broadcastPositionUpdate(
+        toPositionPayload(
+          created.id,
+          marketId,
+          agentId,
+          outcomeIndex,
+          "LONG",
+          quantity,
+          "0",
+          "OPEN",
+          "created"
+        )
+      );
     }
   } else if (decision.action === "sell") {
     // Sell action: Close LONG position or open SHORT position
     if (existingPosition && existingPosition.side === "LONG") {
-      // Close existing LONG position
       await prisma.position.update({
         where: { id: existingPosition.id },
         data: {
@@ -137,9 +201,21 @@ export async function createOrUpdateAgentPosition(input: AgentPositionCreationIn
           updatedAt: new Date(),
         },
       });
+      await broadcastPositionUpdate(
+        toPositionPayload(
+          existingPosition.id,
+          marketId,
+          agentId,
+          outcomeIndex,
+          "LONG",
+          existingPosition.collateralLocked.toString(),
+          existingPosition.avgPrice.toString(),
+          "CLOSED",
+          "closed"
+        )
+      );
     } else {
-      // Create SHORT position
-      await prisma.position.create({
+      const created = await prisma.position.create({
         data: {
           agentId,
           marketId,
@@ -156,6 +232,19 @@ export async function createOrUpdateAgentPosition(input: AgentPositionCreationIn
           tradeReason: reason,
         },
       });
+      await broadcastPositionUpdate(
+        toPositionPayload(
+          created.id,
+          marketId,
+          agentId,
+          outcomeIndex,
+          "SHORT",
+          quantity,
+          "0",
+          "OPEN",
+          "created"
+        )
+      );
     }
   }
 }

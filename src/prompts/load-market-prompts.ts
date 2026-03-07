@@ -93,8 +93,10 @@ OUTPUT FORMAT:
   - "context": string (optional). One short sentence describing the market topic or resolution criteria. Max 256 chars.
   - "durationSeconds": number (optional). Seconds until resolution. Default {{DEFAULT_DURATION_SECONDS}}.
   - "outcomeSlotCount": number (optional). 2 for binary. Default {{DEFAULT_OUTCOME_SLOT_COUNT}}.
+  - "sourceUrl": string (optional). URL of a source for resolution (e.g. news article, official result). Max 2048 chars.
+  - "settlementRules": string (optional). Short rules for how the market resolves (e.g. "Resolves to Yes if X by date Y"). Max 4096 chars.
 - Output MUST be valid JSON only. No markdown, no code fences, no prose before or after.
-- Minified (one line) preferred. Property order: "question" first, then "context", then "durationSeconds", then "outcomeSlotCount".
+- Minified (one line) preferred. Property order: "question", "context", "durationSeconds", "outcomeSlotCount", then "sourceUrl", "settlementRules" if present.
 - Generate exactly the number of items requested (or up to 10 if not specified).
 
 DURATION VARIETY (for simulation and date-range filtering):
