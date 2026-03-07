@@ -180,6 +180,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           makerUserId: null,
           makerAgentId: null,
           executedAt,
+          txHash: creResult.txHash ?? undefined,
         };
         await enqueueOrderAndTradesForPersistence(order, [trade]);
         const redis = await getRedisPublisher();

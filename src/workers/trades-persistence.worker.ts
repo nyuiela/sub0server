@@ -480,6 +480,7 @@ async function persistTrades(job: Job<TradesJobPayload>): Promise<void> {
       amount: t.quantity,
       price: t.price,
       chainKey: orderChainKey ?? undefined,
+      txHash: t.txHash ?? undefined,
       createdAt: new Date(t.executedAt),
     })),
     skipDuplicates: true,

@@ -98,6 +98,8 @@ export interface ExecutedTrade {
   /** EIP-712 signature from taker/maker when available; agent signature is taken from order.crePayload in persistence. */
   userSignature?: string | null;
   executedAt: number;
+  /** On-chain transaction hash when trade was executed via CRE; persisted to Trade.txHash. */
+  txHash?: string | null;
 }
 
 export type { CreOrderPayload } from "./cre-order.js";
