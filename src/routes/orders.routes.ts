@@ -163,7 +163,7 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
           createdAt: executedAt,
           userId: userId ?? undefined,
           agentId: agentId ?? undefined,
-          crePayload: null,
+          crePayload: crePayload ?? null,
           chainKey: chainKey ?? null,
         };
         const trade: ExecutedTrade = {
@@ -183,7 +183,15 @@ export async function registerOrderRoutes(app: FastifyInstance): Promise<void> {
         };
         await enqueueOrderAndTradesForPersistence(order, [trade]);
         const redis = await getRedisPublisher();
-        await redis.publish(REDIS_CHANNELS.TRADES, JSON.stringify({ trade }));
+        await redis.publish(
+          REDIS_CHANNELS.TRADES,
+          JSON.stringify({
+            trade,
+            orderId: order.id,
+            crePayload: order.crePayload ?? undefined,
+            txHash: creResult.txHash ?? undefined,
+          })
+        );
         await redis.publish(REDIS_CHANNELS.MARKET_UPDATES, JSON.stringify({ marketId: resolvedMarket.id, reason: "orderbook" }));
         return reply.code(201).send({
           orderId,

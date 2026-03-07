@@ -19,10 +19,17 @@ import type {
   AIAnalysisUpdatePayload,
   AgentMarketActionPayload,
   LMSRPricingUpdatePayload,
+  CrePayloadForFrontend,
 } from "../types/websocket-events.js";
 import { getRedisPublisher, getRedisSubscriber } from "../lib/redis.js";
 
 const BROADCAST_CHANNEL = "ws:broadcast";
+
+/** Strip sensitive fields (userSignature, conditionId) from crePayload before sending to frontend. */
+function sanitizeCrePayloadForFrontend(p: Record<string, unknown>): CrePayloadForFrontend {
+  const { userSignature, conditionId, ...rest } = p;
+  return rest as CrePayloadForFrontend;
+}
 
 interface SocketMeta {
   lastPongAt: number;
@@ -78,7 +85,8 @@ export class SocketManager {
         REDIS_CHANNELS.USER_ASSET_CHANGES,
         REDIS_CHANNELS.AI_ANALYSIS,
         REDIS_CHANNELS.AGENT_MARKET_ACTIONS,
-        REDIS_CHANNELS.LMSR_PRICING
+        REDIS_CHANNELS.LMSR_PRICING,
+        REDIS_CHANNELS.ORDER_CRE_PAYLOAD
       );
       sub.on("message", (channel: string, message: string) => {
       try {
@@ -105,13 +113,20 @@ export class SocketManager {
           return;
         }
         if (channel === REDIS_CHANNELS.TRADES) {
-          const { trade } = JSON.parse(message) as {
-            trade: { marketId: string; outcomeIndex?: number; side: string; quantity: string; price: string; executedAt: number; userId?: string; agentId?: string };
+          const parsed = JSON.parse(message) as {
+            trade: { id?: string; marketId: string; outcomeIndex?: number; side: string; quantity: string; price: string; executedAt: number; userId?: string; agentId?: string };
+            orderId?: string;
+            crePayload?: Record<string, unknown>;
+            txHash?: string;
           };
+          const { trade, orderId, crePayload: rawCrePayload, txHash: msgTxHash } = parsed;
           const room = `${ROOM_PREFIX}${trade.marketId}`;
+          const crePayload = rawCrePayload != null ? sanitizeCrePayloadForFrontend(rawCrePayload) : undefined;
+          const txHash = msgTxHash ?? (crePayload && "txHash" in crePayload ? (crePayload as { txHash?: string }).txHash : undefined);
           this.broadcastToLocalRoom(room, {
             type: WS_EVENT_NAMES.TRADE_EXECUTED,
             payload: {
+              tradeId: trade.id ?? orderId ?? "",
               marketId: trade.marketId,
               outcomeIndex: trade.outcomeIndex,
               side: trade.side === "BID" ? "long" : "short",
@@ -120,6 +135,30 @@ export class SocketManager {
               executedAt: new Date(trade.executedAt).toISOString(),
               userId: trade.userId,
               agentId: trade.agentId,
+              ...(txHash != null ? { txHash } : {}),
+              ...(crePayload != null ? { crePayload } : {}),
+            },
+          });
+          return;
+        }
+        if (channel === REDIS_CHANNELS.ORDER_CRE_PAYLOAD) {
+          const raw = JSON.parse(message) as {
+            orderId: string;
+            marketId: string;
+            outcomeIndex?: number;
+            side?: "BID" | "ASK";
+            crePayload: Record<string, unknown>;
+          };
+          const room = `${ROOM_PREFIX}${raw.marketId}`;
+          const crePayload = sanitizeCrePayloadForFrontend(raw.crePayload);
+          this.broadcastToLocalRoom(room, {
+            type: WS_EVENT_NAMES.ORDER_CRE_PAYLOAD,
+            payload: {
+              orderId: raw.orderId,
+              marketId: raw.marketId,
+              outcomeIndex: raw.outcomeIndex,
+              side: raw.side,
+              crePayload,
             },
           });
           return;

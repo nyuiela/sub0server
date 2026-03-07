@@ -6,6 +6,7 @@ export const WS_EVENT_NAMES = {
 
   // Activity & Trade events
   TRADE_EXECUTED: "TRADE_EXECUTED",
+  ORDER_CRE_PAYLOAD: "ORDER_CRE_PAYLOAD",
   ACTIVITY_LOG: "ACTIVITY_LOG",
 
   // Order book
@@ -88,6 +89,23 @@ export interface TradeExecutedPayload {
   userId?: string;
   executedAt: string;
   txHash?: string;
+  /** CRE execution result: tx hash(es) and quote fields; present when available (sync or after callback). */
+  crePayload?: CrePayloadForFrontend;
+}
+
+/** CRE payload exposed to frontend (no userSignature). Includes tx hash once CRE has executed. */
+export interface CrePayloadForFrontend {
+  questionId?: string;
+  outcomeIndex?: number;
+  buy?: boolean;
+  quantity?: string;
+  tradeCostUsdc?: string;
+  nonce?: string;
+  deadline?: string;
+  users?: string[];
+  txHash?: string;
+  txHashes?: string[];
+  errors?: unknown[];
 }
 
 /** Position update - emitted when user's position in a market changes */
@@ -150,6 +168,15 @@ export interface AgentMarketActionPayload {
     price?: string;
     reasoning?: string;
   };
+}
+
+/** Order CRE payload update – when CRE callback stores txHash/result on the order. */
+export interface OrderCrePayloadUpdatePayload {
+  orderId: string;
+  marketId: string;
+  outcomeIndex?: number;
+  side?: "BID" | "ASK";
+  crePayload: CrePayloadForFrontend;
 }
 
 /** LMSR pricing update - real-time pricing from CRE */
@@ -215,6 +242,7 @@ export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.MARKET_UPDATED]: MarketUpdatedPayload;
   [WS_EVENT_NAMES.MARKET_STATS_UPDATED]: MarketStatsUpdatedPayload;
   [WS_EVENT_NAMES.TRADE_EXECUTED]: TradeExecutedPayload;
+  [WS_EVENT_NAMES.ORDER_CRE_PAYLOAD]: OrderCrePayloadUpdatePayload;
   [WS_EVENT_NAMES.ACTIVITY_LOG]: ActivityLogPayload;
   [WS_EVENT_NAMES.ORDER_BOOK_UPDATE]: OrderBookUpdatePayload;
   [WS_EVENT_NAMES.PRICE_UPDATE]: PriceUpdatePayload;

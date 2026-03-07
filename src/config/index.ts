@@ -352,6 +352,7 @@ export const REDIS_CHANNELS = {
   PRICE_FEED: "price_feed",
   MARKET_UPDATES: "market_updates",
   TRADES: "trades",
+  ORDER_CRE_PAYLOAD: "order_cre_payload",
   ORDER_BOOK_UPDATE: "order_book_update",
   AGENT_UPDATES: "agent_updates",
   // New enhanced channels

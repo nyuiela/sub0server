@@ -35,6 +35,9 @@ export interface OrderBookUpdateMessage {
 /** Payload published to Redis for TRADE_EXECUTED (per trade). */
 export interface TradeExecutedMessage {
   trade: ExecutedTrade;
+  orderId?: string;
+  crePayload?: unknown;
+  txHash?: string;
 }
 
 /** Queued order plus resolve/reject for the submitter. */
@@ -123,7 +126,11 @@ async function processOne(marketId: string, outcomeIndex: number, input: OrderIn
   for (const trade of result.trades) {
     await redis.publish(
       REDIS_CHANNELS.TRADES,
-      JSON.stringify({ trade } as TradeExecutedMessage)
+      JSON.stringify({
+        trade,
+        orderId: result.order.id,
+        crePayload: result.order.crePayload ?? undefined,
+      } as TradeExecutedMessage)
     );
   }
 
