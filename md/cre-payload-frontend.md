@@ -6,7 +6,7 @@ This document describes how the frontend receives and uses **crePayload** (CRE e
 
 ## 1. What is crePayload?
 
-When a user or agent places a **market order** (or a limit order is filled), the backend sends the trade to **CRE** (Confidential Reporting Environment) to execute on-chain. CRE returns:
+When a user or agent places a **market order** (or a limit order is filled), the backend sends the trade to **CRE** (Confidential Reporting Environment) to execute on-chain. CRE returns :
 
 - **Sync path:** Backend gets `txHash` in the HTTP response and can include it immediately in the trade response and in the first WebSocket broadcast.
 - **Callback path:** CRE executes asynchronously and later POSTs to `/api/cre/buy` or `/api/cre/sell` with the same quote fields plus `txHash` (or `txHashes`) and optional `errors`. The backend stores this in the order’s `crePayload` and broadcasts it so the frontend can show the final tx hash and any errors.
