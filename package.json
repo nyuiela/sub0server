@@ -16,6 +16,7 @@
     "db:reset": "prisma migrate reset --force",
     "db:migrate:fix-history": "prisma migrate resolve --rolled-back 20260227034618_agent_trading",
     "db:seed": "prisma db seed",
+    "seed:agent-mrkaleel": "tsx src/scripts/seed-agent-mrkaleel-tracks.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "worker": "tsx src/workers/agent-worker.ts",
