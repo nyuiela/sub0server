@@ -5,7 +5,7 @@ import { requireUser } from "../lib/auth.js";
 import { getRedisConnection } from "../lib/redis.js";
 import { upsertAgentChainBalance } from "../lib/agent-chain-balance.js";
 import { CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
-import { enqueueAgentPredictionNow } from "../workers/queue.js";
+import { enqueueAgentPredictionNow, getAgentQueue } from "../workers/queue.js";
 import {
   getTenderlyChainConfig,
   checkFundingEligibility,
@@ -14,7 +14,11 @@ import {
   getErc20Balance,
 } from "../utils/tenderly/index.js";
 import { getX402Config } from "../x402/config.js";
-import { computeSimulatePriceUsdc, usdcToAtomic } from "../x402/pricing.js";
+import {
+  computeSimulatePriceUsdc,
+  computeSimulateExtendPriceUsdc,
+  usdcToAtomic,
+} from "../x402/pricing.js";
 import { paySimulateWithAgent } from "../services/agent-x402-pay.service.js";
 
 const USDC_DECIMALS = 6;
@@ -490,6 +494,167 @@ export async function registerSimulateRoutes(app: FastifyInstance): Promise<void
         simulationId: simulation.id,
         enqueued: marketsInRange.length,
         jobIds,
+      });
+    }
+  );
+
+  /** GET /api/simulate/queue-status - Agent prediction queue counts (waiting, active). For UI to show worker activity. */
+  app.get("/api/simulate/queue-status", async (req: FastifyRequest, reply: FastifyReply) => {
+    const user = requireUser(req);
+    if (!user?.userId) {
+      return reply.code(401).send({ error: "Authentication required" });
+    }
+    try {
+      const queue = await getAgentQueue();
+      const counts = await queue.getJobCounts();
+      return reply.send({
+        waiting: counts.waiting ?? 0,
+        active: counts.active ?? 0,
+        completed: counts.completed ?? 0,
+        failed: counts.failed ?? 0,
+      });
+    } catch (err) {
+      return reply.code(500).send({
+        error: "Queue status unavailable",
+        waiting: 0,
+        active: 0,
+        completed: 0,
+        failed: 0,
+      });
+    }
+  });
+
+  /** POST /api/simulate/extend - Add time and markets to a running simulation. Requires x402 payment for the increment. */
+  app.post(
+    "/api/simulate/extend",
+    async (
+      req: FastifyRequest<{
+        Body: {
+          simulationId?: string;
+          additionalDurationMinutes?: number;
+          additionalMarkets?: number;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const user = requireUser(req);
+      if (!user?.userId) {
+        return reply.code(401).send({ error: "Authentication required" });
+      }
+      const simulationId = req.body?.simulationId?.trim();
+      if (!simulationId) {
+        return reply.code(400).send({ error: "simulationId is required" });
+      }
+      const rawAddMin = req.body?.additionalDurationMinutes;
+      const rawAddMarkets = req.body?.additionalMarkets;
+      const addMin =
+        typeof rawAddMin === "number" && Number.isFinite(rawAddMin)
+          ? Math.max(0, Math.min(120, Math.floor(rawAddMin)))
+          : typeof rawAddMin === "string"
+            ? Math.max(0, Math.min(120, Math.floor(Number(rawAddMin)) || 0))
+            : 0;
+      const addMarkets =
+        typeof rawAddMarkets === "number" && Number.isFinite(rawAddMarkets)
+          ? Math.max(0, Math.min(200, Math.floor(rawAddMarkets)))
+          : typeof rawAddMarkets === "string"
+            ? Math.max(0, Math.min(200, Math.floor(Number(rawAddMarkets)) || 0))
+            : 0;
+      if (addMin === 0 && addMarkets === 0) {
+        return reply.code(400).send({
+          error: "Provide at least one of additionalDurationMinutes or additionalMarkets (both > 0)",
+        });
+      }
+      const prisma = getPrismaClient();
+      const sim = await prisma.simulation.findFirst({
+        where: { id: simulationId, ownerId: user.userId },
+        select: {
+          id: true,
+          agentId: true,
+          dateRangeStart: true,
+          dateRangeEnd: true,
+          durationMinutes: true,
+          maxMarkets: true,
+          status: true,
+        },
+      });
+      if (!sim) {
+        return reply.code(404).send({ error: "Simulation not found" });
+      }
+      if (sim.status !== "RUNNING") {
+        return reply.code(400).send({ error: "Simulation is not running; cannot extend" });
+      }
+      const x402Config = getX402Config();
+      if (x402Config.enabled && x402Config.receiverAddress?.trim()) {
+        const amountUsdc = computeSimulateExtendPriceUsdc(addMarkets, addMin);
+        if (amountUsdc <= 0) {
+          return reply.code(400).send({
+            error: "Extension requires at least one of additionalDurationMinutes or additionalMarkets",
+          });
+        }
+        const amountAtomic = usdcToAtomic(amountUsdc);
+        const payResult = await paySimulateWithAgent(sim.agentId, amountAtomic);
+        if (!payResult.ok) {
+          return reply.code(400).send({ error: payResult.error });
+        }
+      }
+      let addedCount = 0;
+      if (addMarkets > 0) {
+        const existing = await prisma.agentEnqueuedMarket.findMany({
+          where: { simulationId },
+          select: { marketId: true },
+        });
+        const existingIds = new Set(existing.map((r) => r.marketId));
+        const pool = await prisma.market.findMany({
+          where: {
+            questionId: { not: null },
+            id: { notIn: [...existingIds] },
+            OR: [
+              {
+                resolutionDate: { gte: sim.dateRangeStart, lte: sim.dateRangeEnd },
+              },
+              {
+                createdAt: { lte: sim.dateRangeEnd },
+                resolutionDate: { gt: sim.dateRangeEnd },
+              },
+            ],
+          },
+          select: { id: true },
+        });
+        const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+        const toAdd = shuffled.slice(0, addMarkets);
+        for (const market of toAdd) {
+          await prisma.agentEnqueuedMarket.create({
+            data: {
+              agentId: sim.agentId,
+              marketId: market.id,
+              simulationId: sim.id,
+              chainKey: CHAIN_KEY_TENDERLY,
+              simulateDateRangeStart: sim.dateRangeStart,
+              simulateDateRangeEnd: sim.dateRangeEnd,
+              tradeReason: "No reason provided",
+            },
+          });
+          await enqueueAgentPredictionNow({
+            agentId: sim.agentId,
+            marketId: market.id,
+            simulationId: sim.id,
+            chainKey: CHAIN_KEY_TENDERLY,
+          });
+          addedCount += 1;
+        }
+      }
+      const newTotalDuration = sim.durationMinutes + addMin;
+      await prisma.simulation.update({
+        where: { id: simulationId },
+        data: {
+          durationMinutes: newTotalDuration,
+          ...(addedCount > 0 ? { maxMarkets: sim.maxMarkets + addedCount } : {}),
+        },
+      });
+      return reply.send({
+        addedMarkets: addedCount,
+        additionalDurationMinutes: addMin,
+        newTotalDurationMinutes: newTotalDuration,
       });
     }
   );

@@ -21,6 +21,17 @@ export function computeSimulatePriceUsdc(
   );
 }
 
+/** Price for extending a simulation (incremental only: no base). */
+export function computeSimulateExtendPriceUsdc(
+  additionalMarkets: number,
+  additionalMinutes: number
+): number {
+  return (
+    additionalMarkets * SIMULATE_PRICE_PER_MARKET_USDC +
+    additionalMinutes * SIMULATE_PRICE_PER_MINUTE_USDC
+  );
+}
+
 /** USDC atomic units (1 USDC = 10^6). */
 export function usdcToAtomic(usdc: number): string {
   const clamped = Math.max(0, usdc);
