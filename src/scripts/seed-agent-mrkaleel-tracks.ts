@@ -12,7 +12,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Decimal } from "decimal.js";
 
-const AGENT_ID = "0dbb4841-dd55-4ff6-9a36-d8a3cb53da98";
+const AGENT_ID = "fb888532-72ca-475d-bf38-9035dadecc11";
 const DAYS_TRACK = 14;
 const REASONING_PER_MARKET_MIN = 2;
 const REASONING_PER_MARKET_MAX = 6;
