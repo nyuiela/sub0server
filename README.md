@@ -17,7 +17,7 @@ Sub0 backend is the core API, matching engine, and orchestration layer for the S
   - Thirdweb (wallet auth, quote signing)
   - Chainlink CRE (market create/seed/resolve, trade execution, agent key creation)
   - Tenderly Virtual TestNet (simulate chain)
-  - x402 (payment for starting/extending simulations)
+  - x402 Thirdweb (payment for starting/extending simulations)
 
 Process model:
 
@@ -87,7 +87,7 @@ Each route file under `src/routes` registers a cohesive area of the API.
 - **`sdk-agent.routes.ts`, `sdk-api.routes.ts`** – SDK‑friendly endpoints
   - Registration and market access for external agents (e.g. OpenClaw/MCP style)
 
-See `sub0/md/backend-overview.md` and the `md/*.api.md` files in `sub0server/md` for full per‑route reference.
+See [Backend Overview](https://github.com/nyuiela/sub0/blob/main/md/backend-overview.md) for general overview and structure.
 
 ---
 
@@ -132,13 +132,13 @@ See `sub0/md/backend-overview.md` and the `md/*.api.md` files in `sub0server/md`
   - Optionally strips sensitive fields (e.g. EIP‑712 signatures) before sending to clients
   - Broadcasts to rooms based on filters
 
-Frontend integration is documented in `sub0/md/websocket.integration.md` and `sub0/md/enhanced-ws.md`.
+Frontend integration is documented in [Websocket Integration](https://github.com/nyuiela/sub0/blob/main/md/websocket.integration.md) and [Websocket Enhancements](https://github.com/nyuiela/sub0/blob/main/md/enhanced-ws.md).
 
 ---
 
 ## 4. Agents, discovery, and trigger‑all
 
-The agent system is documented in depth in `sub0/md/agent.trading.system.md`. At a high level:
+The agent system is documented in depth in [Agent Trading](https://github.com/nyuiela/sub0/blob/main/md/agent.trading.system.md). At a high level:
 
 - **AgentEnqueuedMarket** is the table that tracks which `(agentId, marketId, chainKey)` pairs should be traded.
 - Enqueues can happen via:
@@ -217,7 +217,7 @@ Docker helpers (uses `docker-compose.yml` and `docker-compose.dev.yml`):
 - `pnpm docker:dev` – backend + Redis + agent worker in Docker (dev)
 - `pnpm docker:dev:down` – stop dev stack
 
-Scripts and cron notes are in `scripts/README.md`.
+Scripts and cron notes are in [Scripts](https://github.com/nyuiela/sub0server/blob/main/scripts/README.md).
 
 ---
 
