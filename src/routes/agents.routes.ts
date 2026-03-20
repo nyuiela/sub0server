@@ -8,6 +8,7 @@ import { requestCreCreateAgentKey } from "../lib/cre-create-agent-key.js";
 import { generateAgentKeys } from "../services/agent-keys.service.js";
 import { syncAgentBalance, syncTenderlyBalance } from "../services/agent-balance.service.js";
 import { CHAIN_KEY_TENDERLY } from "../types/agent-chain.js";
+import { deriveEnsSlug } from "../lib/ens-slug.js";
 import {
   agentCreateSchema,
   agentUpdateSchema,
@@ -408,6 +409,33 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     if (modelSettingsForDb !== undefined) data.modelSettings = modelSettingsForDb as Prisma.InputJsonValue;
     const prisma = getPrismaClient();
     const agentId = req.params.id;
+
+    // When the agent name changes, sync the ENS subdomain if it was auto-derived.
+    // Manually-set names (i.e. not matching the old auto-derived slug) are left as-is.
+    // Uses $queryRaw because Prisma types are stale pending `prisma generate` after schema update.
+    if (raw.name !== undefined) {
+      type AgentEnsRow = { name: string; ensName: string | null };
+      const rows = await prisma.$queryRaw<AgentEnsRow[]>`
+        SELECT name, "ensName" FROM "Agent" WHERE id = ${agentId} LIMIT 1
+      `;
+      const current = rows[0] ?? null;
+      if (current) {
+        const oldSlug = deriveEnsSlug(current.name);
+        const isAutoDerived = !current.ensName || current.ensName === `${oldSlug}.sub0.eth`;
+        if (isAutoDerived) {
+          const newSlug = deriveEnsSlug(raw.name);
+          const newEnsName = `${newSlug}.sub0.eth`;
+          type ConflictRow = { id: string };
+          const conflicts = await prisma.$queryRaw<ConflictRow[]>`
+            SELECT id FROM "Agent" WHERE "ensName" = ${newEnsName} AND id != ${agentId} LIMIT 1
+          `;
+          // Only update ensName in the prisma data object via type extension
+          (data as Prisma.AgentUpdateInput & { ensName?: string | null }).ensName =
+            conflicts.length > 0 ? current.ensName : newEnsName;
+        }
+      }
+    }
+
     if (openclawPayload !== undefined) {
       const openclawData: Record<string, string | null> = {};
       for (const k of OPENCLAW_KEYS) {
