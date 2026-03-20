@@ -86,17 +86,19 @@ export async function registerMarketRoutes(app: FastifyInstance): Promise<void> 
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid query", details: parsed.error.flatten() });
     }
-    const { status, creatorAddress, platform, limit, offset, createdAtFrom, createdAtTo } = parsed.data;
+    const { status, creatorAddress, platform, limit, offset, createdAtFrom, createdAtTo, hasOnchainTxHash, questionId } = parsed.data;
     const prisma = getPrismaClient();
     const dateFilter: Prisma.DateTimeFilter = {};
     if (createdAtFrom) dateFilter.gte = new Date(createdAtFrom);
     if (createdAtTo) dateFilter.lte = new Date(createdAtTo);
     const where: Prisma.MarketWhereInput = {
-      questionId: { not: null },
+      questionId: questionId ? questionId : { not: null },
       ...(status ? { status } : {}),
       ...(creatorAddress ? { creatorAddress } : {}),
       ...(platform ? { platform } : {}),
       ...(Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {}),
+      ...(hasOnchainTxHash === "true" ? { onchainTxHash: { not: null } } : {}),
+      ...(hasOnchainTxHash === "false" ? { onchainTxHash: null } : {}),
     };
     const [markets, total] = await Promise.all([
       prisma.market.findMany({

@@ -1,4 +1,6 @@
 import contracts from "../lib/contracts.json" with { type: "json" };
+import { serverConfig as D } from "./server.config.js";
+
 const requiredEnv = (key: string): string => {
   const value = process.env[key];
   if (value === undefined || value === "") {
@@ -14,7 +16,7 @@ const optionalEnv = (key: string, fallback: string): string => {
 function makeConfig() {
   return {
     get port(): number {
-      return Number(optionalEnv("PORT", "3000"));
+      return Number(optionalEnv("PORT", String(D.port)));
     },
     get nodeEnv(): string {
       return optionalEnv("NODE_ENV", "development");
@@ -32,17 +34,17 @@ function makeConfig() {
       return optionalEnv("BINANCE_WS_URL", "wss://stream.binance.com:9443/ws");
     },
     get appName(): string {
-      return optionalEnv("APP_NAME", "sub0");
+      return optionalEnv("APP_NAME", D.appName);
     },
     get challengeTtlSeconds(): number {
-      return Number(optionalEnv("CHALLENGE_TTL_SECONDS", "300"));
+      return Number(optionalEnv("CHALLENGE_TTL_SECONDS", String(D.challengeTtlSeconds)));
     },
     /** Domain used for Thirdweb JWT verification. Must match the frontend origin where the user signs in (e.g. localhost:3002 if app runs there). */
     get authDomain(): string {
       return optionalEnv("AUTH_DOMAIN", "localhost:3000");
     },
     get authCookieName(): string {
-      return optionalEnv("AUTH_COOKIE_NAME", "sub0-auth-jwt");
+      return optionalEnv("AUTH_COOKIE_NAME", D.authCookieName);
     },
     get thirdwebSecretKey(): string | undefined {
       return process.env.THIRDWEB_SECRET_KEY ?? undefined;
@@ -70,11 +72,11 @@ function makeConfig() {
     },
     /** Initial LONG size per outcome when creating platform positions on market create. */
     get platformInitialLiquidityPerOutcome(): number {
-      return Number(optionalEnv("PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME", "1000000"));
+      return Number(optionalEnv("PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME", String(D.platformInitialLiquidityPerOutcome)));
     },
-    /** News ingestion: poll interval in ms (default 10s). */
+    /** News ingestion: poll interval in ms. */
     get newsPollIntervalMs(): number {
-      return Number(optionalEnv("NEWS_POLL_INTERVAL_MS", "100000"));
+      return Number(optionalEnv("NEWS_POLL_INTERVAL_MS", String(D.newsPollIntervalMs)));
     },
     /** CryptoPanic API key (optional). When set, fetches from CryptoPanic in addition to RSS. */
     get cryptopanicApiKey(): string | undefined {
@@ -88,7 +90,7 @@ function makeConfig() {
     },
     /** Agent market creation: markets per agent per job (default 10). Each agent (Gemini, XAI, Open WebUI) generates this many; total = agents * this value, capped by service max (e.g. 50). */
     get agentMarketsPerJob(): number {
-      return Math.max(1, Math.min(50, Number(optionalEnv("AGENT_MARKETS_PER_JOB", "10"))));
+      return Math.max(1, Math.min(50, Number(optionalEnv("AGENT_MARKETS_PER_JOB", String(D.agentMarketsPerJob)))));
     },
     /** Gemini API key for AI-generated market questions. Optional; fallback if GEMINI_API_KEYS_* not set. */
     get geminiApiKey(): string | undefined {
@@ -146,11 +148,12 @@ function makeConfig() {
     },
     /** Default USDC amount for agent-created market seed (CRE createMarket payload). Matches create-market-payload.json. */
     get agentMarketAmountUsdc(): string {
-      return process.env.AGENT_MARKET_AMOUNT_USDC?.trim() || "1000000";
+      return process.env.AGENT_MARKET_AMOUNT_USDC?.trim() || D.agentMarketAmountUsdc;
     },
-    /** When true, if all LLM providers (Gemini/Grok/Open WebUI) fail or return empty, use static demo market payloads so CRE can still create markets. Use when APIs are out of quota. */
+    /** When true, use static demo market payloads if all LLM providers fail. */
     get agentMarketCreationFallbackDemo(): boolean {
-      return process.env.AGENT_MARKET_CREATION_FALLBACK_DEMO === "true" || process.env.AGENT_MARKET_CREATION_FALLBACK_DEMO === "1";
+      const v = process.env.AGENT_MARKET_CREATION_FALLBACK_DEMO;
+      return v !== undefined ? (v === "true" || v === "1") : D.agentMarketCreationFallbackDemo;
     },
     /** Default collateral token address for agent-created markets (e.g. USDC). */
     get defaultCollateralToken(): string {
@@ -175,7 +178,7 @@ function makeConfig() {
           // fallback
         }
       }
-      return BigInt("30000000000000000"); // 0.03 ETH
+      return D.agentOnboardingEthWei;
     },
     /** USDC amount for predictionVault.seedMarketLiquidity in smallest units (6 decimals). Use PLATFORM_INITIAL_LIQUIDITY_RAW for raw bigint, else PLATFORM_INITIAL_LIQUIDITY_PER_OUTCOME (number) * 10^6. Capped to avoid contract reverts from absurd env values. */
     get platformSeedAmountUsdcRaw(): bigint {
@@ -258,7 +261,7 @@ function makeConfig() {
     },
     /** Open WebUI model name (e.g. gpt-oss:20b, llama3). */
     get openWebUiModel(): string {
-      return process.env.OPENWEBUI_MODEL?.trim() || "gpt-oss:20b";
+      return process.env.OPENWEBUI_MODEL?.trim() || D.openWebUiModel;
     },
     /** Base URL for claim links (e.g. https://app.sub0.xyz). Used in BYOA registration response. */
     get frontendBaseUrl(): string {
@@ -275,11 +278,10 @@ function makeConfig() {
     },
     /** EIP-712 domain name for PredictionVault (e.g. Sub0PredictionVault). */
     get eip712DomainName(): string {
-      return optionalEnv("EIP712_DOMAIN_NAME", "Sub0PredictionVault");
+      return optionalEnv("EIP712_DOMAIN_NAME", D.eip712DomainName);
     },
-    /** EIP-712 domain version (e.g. 1). */
     get eip712DomainVersion(): string {
-      return optionalEnv("EIP712_DOMAIN_VERSION", "1");
+      return optionalEnv("EIP712_DOMAIN_VERSION", D.eip712DomainVersion);
     },
     /** CRE HTTP endpoint for triggering workflows (e.g. createAgentKey). When set, POST /api/agents/:id/create-wallet is enabled. */
     get creHttpUrl(): string | undefined {
@@ -291,19 +293,19 @@ function makeConfig() {
     },
     /** If true, backend will POST createMarketsFromBackend to CRE on an interval (requires creHttpUrl). */
     get creMarketCronEnabled(): boolean {
-      return process.env.CRE_MARKET_CRON_ENABLED === "true" || process.env.CRE_MARKET_CRON_ENABLED === "1";
+      const v = process.env.CRE_MARKET_CRON_ENABLED;
+      return v !== undefined ? (v === "true" || v === "1") : D.creMarketCronEnabled;
     },
-    /** Interval in ms for createMarketsFromBackend job (default 1 hour). */
     get creMarketCronIntervalMs(): number {
-      return Math.max(60_000, Number(process.env.CRE_MARKET_CRON_INTERVAL_MS) || 3600_000);
+      return Math.max(60_000, Number(process.env.CRE_MARKET_CRON_INTERVAL_MS) || D.creMarketCronIntervalMs);
     },
-    /** If true, cron sends broadcast: true to CRE so simulate runs with --broadcast (real onchain txs). Set in sub0server .env (CRE_MARKET_CRON_BROADCAST=true). Default false = dry run, no tx hash. */
     get creMarketCronBroadcast(): boolean {
-      return process.env.CRE_MARKET_CRON_BROADCAST === "true" || process.env.CRE_MARKET_CRON_BROADCAST === "1";
+      const v = process.env.CRE_MARKET_CRON_BROADCAST;
+      return v !== undefined ? (v === "true" || v === "1") : D.creMarketCronBroadcast;
     },
-    /** If true (default), cron generates markets (agents * agentMarketsPerJob) and sends them in the request body so CRE batches all on-chain in one run with one batch callback. If false, CRE fetches via GET (cap 4 per run). */
     get creMarketCronBatchPayload(): boolean {
-      return process.env.CRE_MARKET_CRON_BATCH_PAYLOAD === "true" || process.env.CRE_MARKET_CRON_BATCH_PAYLOAD === "1";
+      const v = process.env.CRE_MARKET_CRON_BATCH_PAYLOAD;
+      return v !== undefined ? (v === "true" || v === "1") : D.creMarketCronBatchPayload;
     },
     /** Backend base URL for worker to call POST /api/orders. Default: same host as this server (port from PORT). Backend typically runs on 4000. */
     get backendUrl(): string {
@@ -311,37 +313,51 @@ function makeConfig() {
     },
     /** If true, agent worker runs scout→analyze→trade (LLM + POST /api/orders). If false, worker only logs the job. */
     get agentTradingEnabled(): boolean {
-      return process.env.AGENT_TRADING_ENABLED === "true" || process.env.AGENT_TRADING_ENABLED === "1";
+      const v = process.env.AGENT_TRADING_ENABLED;
+      return v !== undefined ? (v === "true" || v === "1") : D.agentTradingEnabled;
     },
-    /** If true, trigger-all runs discovery: fetch OPEN markets and enqueue new ones per agent (main only). Default true. */
     get agentDiscoveryEnabled(): boolean {
-      return process.env.AGENT_DISCOVERY_ENABLED === "true" || process.env.AGENT_DISCOVERY_ENABLED === "1";
+      const v = process.env.AGENT_DISCOVERY_ENABLED;
+      return v !== undefined ? (v === "true" || v === "1") : D.agentDiscoveryEnabled;
     },
-    /** Max new markets to enqueue per agent per discovery run (main). Default 10. */
     get agentDiscoveryMaxNewPerAgentPerRun(): number {
-      return Math.max(1, Math.min(50, Number(process.env.AGENT_DISCOVERY_MAX_NEW_PER_AGENT) || 10));
+      return Math.max(1, Math.min(50, Number(process.env.AGENT_DISCOVERY_MAX_NEW_PER_AGENT) || D.agentDiscoveryMaxNewPerAgent));
     },
-    /** Max OPEN markets to fetch when discovering (main). Default 50. */
     get agentDiscoveryMarketsLimit(): number {
-      return Math.max(10, Math.min(200, Number(process.env.AGENT_DISCOVERY_MARKETS_LIMIT) || 50));
+      return Math.max(10, Math.min(200, Number(process.env.AGENT_DISCOVERY_MARKETS_LIMIT) || D.agentDiscoveryMarketsLimit));
     },
-    /** If true, backend runs trigger-all on an interval (no separate cron script/container). Default false. */
     get triggerAllCronEnabled(): boolean {
-      return process.env.TRIGGER_ALL_CRON_ENABLED === "true" || process.env.TRIGGER_ALL_CRON_ENABLED === "1";
+      const v = process.env.TRIGGER_ALL_CRON_ENABLED;
+      return v !== undefined ? (v === "true" || v === "1") : D.triggerAllCronEnabled;
     },
-    /** Interval in ms for in-process trigger-all cron. Default 300000 (5 min). Only when TRIGGER_ALL_CRON_ENABLED=true. */
     get triggerAllCronIntervalMs(): number {
-      return Math.max(60_000, Number(process.env.TRIGGER_ALL_CRON_INTERVAL_MS) || 300_000);
+      return Math.max(60_000, Number(process.env.TRIGGER_ALL_CRON_INTERVAL_MS) || D.triggerAllCronIntervalMs);
+    },
+    /**
+     * When true, trigger-all still enqueues AgentEnqueuedMarket rows for discovery
+     * but skips BullMQ job enqueue — CRE agent-analysis workflow processes them instead.
+     * Set TRIGGER_ALL_CRE_DELEGATED=true when CRE workflows are active.
+     */
+    get triggerAllCreDelegated(): boolean {
+      const v = process.env.TRIGGER_ALL_CRE_DELEGATED;
+      return v !== undefined ? (v === "true" || v === "1") : D.triggerAllCreDelegated;
+    },
+    /**
+     * When true, backend operates in CRE worker mode: all agent analysis and settlement
+     * is fully delegated to CRE workflows. BullMQ job processing is disabled.
+     * Set CRE_WORKER_MODE=true when CRE workflows are deployed and active.
+     */
+    get creWorkerMode(): boolean {
+      const v = process.env.CRE_WORKER_MODE;
+      return v !== undefined ? (v === "true" || v === "1") : D.creWorkerMode;
     },
     get agentOnboardingEthWeiBaseSepolia(): bigint {
       const raw = process.env.AGENT_ONBOARDING_ETH_WEI_BASE_SEPOLIA?.trim();
-      if (raw) return BigInt(raw);
-      return BigInt("30000000000000000"); // default 0.03 ETH
+      return raw ? BigInt(raw) : D.agentOnboardingEthWei;
     },
     get agentOnboardingUsdcAmount(): bigint {
       const raw = process.env.AGENT_ONBOARDING_USDC_AMOUNT?.trim();
-      if (raw) return BigInt(raw);
-      return 2000000n; // default USDC
+      return raw ? BigInt(raw) : D.agentOnboardingUsdcAmount;
     },
   };
 }
@@ -364,7 +380,7 @@ export const REDIS_CHANNELS = {
   LMSR_PRICING: "lmsr_pricing",
 } as const;
 
-export const HEARTBEAT_INTERVAL_MS = 30_000;
+export const HEARTBEAT_INTERVAL_MS = D.heartbeatIntervalMs;
 export const ROOM_PREFIX = "market:";
 
 // Enhanced room structure

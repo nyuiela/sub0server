@@ -1,6 +1,7 @@
 /**
  * Agent-paid x402: pay simulation fee from the agent's wallet on the x402 chain (Base Sepolia / Base).
  * Used when starting a simulation so the user does not pay; the agent signs with its private key.
+ * Also exposes chargeForCREExecution for per-execution payments from CRE workflows.
  */
 
 import { createPublicClient, createWalletClient, http, type Address, type Hex } from "viem";
@@ -127,4 +128,27 @@ export async function paySimulateWithAgent(
     const msg = err instanceof Error ? err.message : "Transfer failed";
     return { ok: false, error: `Payment failed: ${msg}`, code: "TRANSFER_FAILED" };
   }
+}
+
+const CRE_EXECUTION_AMOUNTS: Record<string, string> = {
+  analysis: "300",
+  trade: "500",
+  settlement: "800",
+};
+
+/**
+ * Charge an agent for a CRE workflow execution (analysis, trade, or settlement).
+ * Called from backend before dispatching HTTP trigger to CRE workflows.
+ * Returns true if charge succeeded or payment is not configured.
+ */
+export async function chargeForCREExecution(
+  agentId: string,
+  actionType: "analysis" | "trade" | "settlement"
+): Promise<boolean> {
+  const x402 = getX402Config();
+  if (!x402.enabled) return true;
+
+  const amount = CRE_EXECUTION_AMOUNTS[actionType] ?? "300";
+  const result = await paySimulateWithAgent(agentId, amount);
+  return result.ok;
 }

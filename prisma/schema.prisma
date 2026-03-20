@@ -161,6 +161,8 @@ model AgentEnqueuedMarket {
   updatedAt              DateTime    @updatedAt
   createdAt              DateTime    @default(now())
   tradeReason            String
+  /// * CRE workflow run id for traceability. Set by analysis-complete callback.
+  workflowRunId          String?
   agent                  Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
   market                 Market      @relation(fields: [marketId], references: [id], onDelete: Cascade)
   simulation             Simulation? @relation(fields: [simulationId], references: [id], onDelete: Cascade)
@@ -190,12 +192,20 @@ model AgentOpenClaw {
 }
 
 model AgentStrategy {
-  id              String       @id @default(uuid())
-  agentId         String       @unique
-  preference      StrategyPref @default(HYBRID)
-  maxSlippage     Float
-  spreadTolerance Float
-  agent           Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  id                  String      @id @default(uuid())
+  agentId             String      @unique
+  preference          StrategyPref @default(HYBRID)
+  maxSlippage         Float
+  spreadTolerance     Float
+  /// Risk level used by the compliance guard before allowing agent trades.
+  riskLevel           RiskLevel?
+  /// Maximum USDC exposure per market (null = unlimited).
+  maxExposureUsd      Float?
+  /// JSON array of allowed market type strings (null = all allowed).
+  allowedMarketTypes  String?
+  /// Hard cap on daily orders per agent (null = unlimited).
+  maxDailyTrades      Int?
+  agent               Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
 }
 
 model AgentTrack {
@@ -248,6 +258,10 @@ model Market {
   questionId           String?               @unique
   /// * Tx hash of create(Market) when created via CRE. Audit only.
   createMarketTxHash   String?
+  /// * On-chain tx hash populated by registry-sync CRE workflow. Null until workflow confirms creation.
+  onchainTxHash        String?
+  /// * CRE workflow run id for traceability. Set when market is processed by a CRE workflow.
+  workflowRunId        String?
   platform             MarketPlatform        @default(NATIVE)
   /// * Optional rules for agent settlement (benchmark for deliberation). Offchain only.
   settlementRules      String?
@@ -549,6 +563,12 @@ enum StrategyPref {
   AMM_ONLY
   ORDERBOOK
   HYBRID
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
 }
 
 enum PendingAgentTradeStatus {

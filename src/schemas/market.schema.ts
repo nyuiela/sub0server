@@ -42,6 +42,10 @@ export const marketQuerySchema = z.object({
   createdAtFrom: z.string().optional(),
   /** ISO date string; markets created before this; also agent info cutoff for Simulate. */
   createdAtTo: z.string().optional(),
+  /** When "true", only return markets with a non-null onchainTxHash (confirmed on-chain). */
+  hasOnchainTxHash: z.enum(["true", "false"]).optional(),
+  /** Filter by exact on-chain questionId (hex string). */
+  questionId: z.string().optional(),
 });
 
 export type MarketCreateInput = z.infer<typeof marketCreateSchema>;

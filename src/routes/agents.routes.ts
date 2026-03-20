@@ -237,16 +237,17 @@ export async function registerAgentRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(payload);
   });
 
-  /** GET /api/agents/:id/reasoning - List AI reasoning logs for an agent (for debugging and detailed analysis). */
-app.get(
-  "/api/agents/:id/reasoning",
-  async (
-    req: FastifyRequest<{
-      Params: { id: string };
-      Querystring: { limit?: string; offset?: string; marketId?: string };
-    }>,
-    reply
-  ) => {
+  /** GET /api/agents/:id/reasoning - List AI reasoning logs for an agent (owner or api-key required). */
+  app.get(
+    "/api/agents/:id/reasoning",
+    async (
+      req: FastifyRequest<{
+        Params: { id: string };
+        Querystring: { limit?: string; offset?: string; marketId?: string };
+      }>,
+      reply
+    ) => {
+    if (!(await requireAgentOwnerOrApiKey(req, reply))) return;
     const { id: agentId } = req.params;
     const { limit = "20", offset = "0", marketId } = req.query;
     const limitNum = Math.min(Math.max(parseInt(limit) || 20, 1), 100);
@@ -291,8 +292,9 @@ app.get(
     }));
     
     return reply.send({ data, total, limit: limitNum, offset: offsetNum });
-  }
-);
+    }
+  );
+
   app.get(
     "/api/agents/:id/enqueued-markets",
     async (

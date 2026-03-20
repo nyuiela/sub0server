@@ -10,7 +10,6 @@ import { getSocketManager } from "./services/websocket.service.js";
 import { getPrismaClient, disconnectPrisma } from "./lib/prisma.js";
 import { closeRedis } from "./lib/redis.js";
 import { resolveRequestAuth } from "./lib/auth.js";
-import { registerAgentEnqueueRoutes } from "./routes/agent-enqueue.routes.js";
 import { registerUserRoutes } from "./routes/users.routes.js";
 import { registerAgentRoutes } from "./routes/agents.routes.js";
 import { registerAgentPendingTradesRoutes } from "./routes/agent-pending-trades.routes.js";
@@ -27,21 +26,16 @@ import { registerSettingsRoutes } from "./routes/settings.routes.js";
 import { registerAuthRoutes } from "./routes/auth.routes.js";
 import { registerSdkAgentRoutes } from "./routes/sdk-agent.routes.js";
 import { registerSdkApiRoutes } from "./routes/sdk-api.routes.js";
-import { registerSettlementInternalRoutes } from "./routes/settlement-internal.routes.js";
 import { registerCreCallbackRoutes } from "./routes/cre-callback.routes.js";
+import { registerCreWorkflowCallbackRoutes } from "./routes/cre-workflow-callbacks.routes.js";
+import { registerSettlementCallbackRoutes } from "./routes/settlement-callbacks.routes.js";
+import { registerCcipInternalRoutes } from "./routes/ccip-internal.routes.js";
 import { registerTradesRoutes } from "./routes/trades.routes.js";
 import { registerUserBalanceRoutes } from "./routes/user-balances.routes.js";
 import { registerSimulateRoutes } from "./routes/simulate.routes.js";
-import { startTradesPersistenceWorker } from "./workers/trades-persistence.worker.js";
-import { startCreMarketCron, stopCreMarketCron } from "./services/cre-market-cron.js";
-import { runTriggerAll } from "./services/trigger-all.service.js";
-import type { Worker } from "bullmq";
-import type { TradesJobPayload } from "./workers/trades-queue.js";
 import type { WebSocket } from "ws";
 
 const fastify = Fastify({ logger: true });
-let tradesWorker: Worker<TradesJobPayload> | null = null;
-let triggerAllCronId: ReturnType<typeof setInterval> | null = null;
 
 await fastify.register(fastifyCookie, { parseOptions: {} });
 await fastify.register(fastifyCors, {
@@ -61,7 +55,15 @@ fastify.addHook("onRequest", async (request) => {
     path === "/api/cre/markets/onchain-created-batch" ||
     path === "/api/cre/agent-keys" ||
     path === "/api/cre/buy" ||
-    path === "/api/cre/sell";
+    path === "/api/cre/sell" ||
+    path === "/api/cre/quote" ||
+    path === "/api/cre/stake" ||
+    path === "/api/cre/redeem" ||
+    path === "/api/cre/execute-confidential-trade" ||
+    path === "/api/internal/cre/macro-data" ||
+    path === "/api/internal/cre/webhook-event" ||
+    path === "/api/internal/cre/registry-record" ||
+    path === "/api/internal/cre/x402-charge";
   if (request.method === "POST" && isCrePost) {
     const ct = request.headers["content-type"];
     if (!ct || String(ct).toLowerCase() === "undefined") {
@@ -196,12 +198,13 @@ fastify.get("/health", async () => ({
 }));
 
 fastify.decorate("prisma", getPrismaClient());
-await registerAgentEnqueueRoutes(fastify);
 await registerAuthRoutes(fastify);
 await registerSdkAgentRoutes(fastify);
 await registerSdkApiRoutes(fastify);
-await registerSettlementInternalRoutes(fastify);
 await registerCreCallbackRoutes(fastify);
+await registerCreWorkflowCallbackRoutes(fastify);
+await registerSettlementCallbackRoutes(fastify);
+await registerCcipInternalRoutes(fastify);
 await registerUserRoutes(fastify);
 await registerAgentRoutes(fastify);
 await registerAgentPendingTradesRoutes(fastify);
@@ -224,17 +227,7 @@ const start = async () => {
     const manager = getSocketManager();
     await manager.start();
     await fastify.listen({ port: config.port, host: "0.0.0.0" });
-    tradesWorker = await startTradesPersistenceWorker();
-    startCreMarketCron(fastify.log);
-    if (config.triggerAllCronEnabled) {
-      const ms = config.triggerAllCronIntervalMs;
-      fastify.log.info({ intervalMs: ms }, "Trigger-all cron started (in-process)");
-      runTriggerAll(fastify.log).catch((err) => fastify.log.warn({ err }, "Trigger-all initial run failed"));
-      triggerAllCronId = setInterval(() => {
-        runTriggerAll(fastify.log).catch((err) => fastify.log.warn({ err }, "Trigger-all cron run failed"));
-      }, ms);
-    }
-    fastify.log.info("Server, WebSocket manager and trades persistence worker started");
+    fastify.log.info("Server and WebSocket manager started. Orchestration delegated to CRE workflows.");
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);
@@ -242,15 +235,6 @@ const start = async () => {
 };
 
 const shutdown = async () => {
-  stopCreMarketCron();
-  if (triggerAllCronId !== null) {
-    clearInterval(triggerAllCronId);
-    triggerAllCronId = null;
-  }
-  if (tradesWorker) {
-    await tradesWorker.close();
-    tradesWorker = null;
-  }
   await fastify.close();
   await disconnectPrisma();
   await closeRedis();

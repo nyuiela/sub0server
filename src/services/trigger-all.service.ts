@@ -1,6 +1,11 @@
 /**
  * Trigger-all logic: discovery (enqueue new OPEN markets per agent) + enqueue due jobs for MAIN.
  * Used by POST /api/agent/trigger-all and by the in-process cron when TRIGGER_ALL_CRON_ENABLED=true.
+ *
+ * CRE delegation flags:
+ * - TRIGGER_ALL_CRE_DELEGATED=true: Discovery still writes AgentEnqueuedMarket rows but skips BullMQ
+ *   job enqueue. The CRE agent-analysis workflow picks them up via /api/internal/cre/enqueued-markets.
+ * - CRE_WORKER_MODE=true: Full CRE worker mode. All BullMQ processing is skipped.
  */
 
 import type { FastifyBaseLogger } from "fastify";
@@ -18,6 +23,8 @@ export interface TriggerAllResult {
 
 export async function runTriggerAll(log?: FastifyBaseLogger): Promise<TriggerAllResult> {
   const prisma = getPrismaClient();
+  const creWorkerMode = config.creWorkerMode;
+  const creeDelegated = creWorkerMode || config.triggerAllCreDelegated;
   let discovered = 0;
 
   if (config.agentDiscoveryEnabled) {
@@ -33,6 +40,7 @@ export async function runTriggerAll(log?: FastifyBaseLogger): Promise<TriggerAll
       select: { id: true },
     });
     const maxNew = config.agentDiscoveryMaxNewPerAgentPerRun;
+
     for (const agent of agents) {
       const existing = await prisma.agentEnqueuedMarket.findMany({
         where: { agentId: agent.id, chainKey: CHAIN_KEY_MAIN, simulationId: null },
@@ -43,15 +51,30 @@ export async function runTriggerAll(log?: FastifyBaseLogger): Promise<TriggerAll
       for (const marketId of openMarketIds) {
         if (added >= maxNew) break;
         if (existingSet.has(marketId)) continue;
-        await enqueueAgentPrediction({ marketId, agentId: agent.id, chainKey: CHAIN_KEY_MAIN });
+
+        if (!creeDelegated) {
+          await enqueueAgentPrediction({ marketId, agentId: agent.id, chainKey: CHAIN_KEY_MAIN });
+        }
+
         const row = await prisma.agentEnqueuedMarket.findFirst({
           where: { agentId: agent.id, marketId, simulationId: null },
         });
         if (row) {
-          await prisma.agentEnqueuedMarket.update({ where: { id: row.id }, data: { chainKey: CHAIN_KEY_MAIN } });
+          await prisma.agentEnqueuedMarket.update({
+            where: { id: row.id },
+            data: { chainKey: CHAIN_KEY_MAIN },
+          });
         } else {
           await prisma.agentEnqueuedMarket.create({
-            data: { agentId: agent.id, marketId, simulationId: null, chainKey: CHAIN_KEY_MAIN, tradeReason: "Auto-enqueued by trigger-all" },
+            data: {
+              agentId: agent.id,
+              marketId,
+              simulationId: null,
+              chainKey: CHAIN_KEY_MAIN,
+              tradeReason: creeDelegated
+                ? "Auto-enqueued by trigger-all (CRE delegation active)"
+                : "Auto-enqueued by trigger-all",
+            },
           });
         }
         existingSet.add(marketId);
@@ -59,6 +82,13 @@ export async function runTriggerAll(log?: FastifyBaseLogger): Promise<TriggerAll
         discovered++;
       }
     }
+  }
+
+  if (creWorkerMode) {
+    if (log) {
+      log.info({ discovered, creWorkerMode: true }, "trigger-all: CRE_WORKER_MODE active; skipping BullMQ job dispatch");
+    }
+    return { discovered, triggered: 0, jobIds: [] };
   }
 
   const now = new Date();
@@ -72,14 +102,24 @@ export async function runTriggerAll(log?: FastifyBaseLogger): Promise<TriggerAll
     select: { agentId: true, marketId: true, chainKey: true },
   });
   const jobIds: string[] = [];
-  for (const row of rows) {
-    const chainKey = isAgentChainKey(row.chainKey) ? row.chainKey : CHAIN_KEY_MAIN;
-    const jobId = await enqueueAgentPredictionNow({ agentId: row.agentId, marketId: row.marketId, chainKey });
-    jobIds.push(jobId);
+
+  if (!creeDelegated) {
+    for (const row of rows) {
+      const chainKey = isAgentChainKey(row.chainKey) ? row.chainKey : CHAIN_KEY_MAIN;
+      const jobId = await enqueueAgentPredictionNow({
+        agentId: row.agentId,
+        marketId: row.marketId,
+        chainKey,
+      });
+      jobIds.push(jobId);
+    }
   }
 
   if (log) {
-    log.info({ discovered, triggered: jobIds.length }, "trigger-all run");
+    log.info(
+      { discovered, triggered: jobIds.length, creeDelegated },
+      "trigger-all run"
+    );
   }
   return { discovered, triggered: jobIds.length, jobIds };
 }

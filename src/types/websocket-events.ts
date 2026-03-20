@@ -25,6 +25,11 @@ export const WS_EVENT_NAMES = {
   // Pricing events
   LMSR_PRICING_UPDATE: "LMSR_PRICING_UPDATE",
 
+  // CRE workflow callback events
+  REGISTRY_SYNC_UPDATE: "REGISTRY_SYNC_UPDATE",
+  ANALYSIS_COMPLETE: "ANALYSIS_COMPLETE",
+  SETTLEMENT_ESCALATED: "SETTLEMENT_ESCALATED",
+
   // Control events
   SUBSCRIBE: "SUBSCRIBE",
   UNSUBSCRIBE: "UNSUBSCRIBE",
@@ -237,6 +242,38 @@ export interface WsErrorPayload {
   message: string;
 }
 
+/** CRE registry sync update — emitted when registrySync workflow posts fresh cache. */
+export interface RegistrySyncUpdatePayload {
+  marketId?: string;
+  source?: string;
+  syncedAt?: string;
+  synced?: number;
+  markets?: string[];
+  eventType?: string;
+  data?: Record<string, unknown>;
+}
+
+/** CRE analysis complete — emitted when agentAnalysis workflow posts a decision. */
+export interface AnalysisCompletePayload {
+  agentId: string;
+  marketId: string;
+  action: string;
+  orderSubmitted?: boolean;
+  decision?: "BUY" | "SELL" | "HOLD";
+  confidence?: number;
+  reasoning?: string;
+  workflowRunId?: string;
+}
+
+/** CRE settlement escalated — emitted when settlementConsensus flags a market for review. */
+export interface SettlementEscalatedPayload {
+  marketId: string;
+  questionId?: string | null;
+  reason?: string;
+  workflowRunId?: string;
+  escalatedAt?: string;
+}
+
 export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.MARKET_UPDATE]: MarketUpdatePayload;
   [WS_EVENT_NAMES.MARKET_UPDATED]: MarketUpdatedPayload;
@@ -252,6 +289,9 @@ export type WsEventPayloadMap = {
   [WS_EVENT_NAMES.AGENT_UPDATED]: AgentUpdatedPayload;
   [WS_EVENT_NAMES.AGENT_MARKET_ACTION]: AgentMarketActionPayload;
   [WS_EVENT_NAMES.LMSR_PRICING_UPDATE]: LMSRPricingUpdatePayload;
+  [WS_EVENT_NAMES.REGISTRY_SYNC_UPDATE]: RegistrySyncUpdatePayload;
+  [WS_EVENT_NAMES.ANALYSIS_COMPLETE]: AnalysisCompletePayload;
+  [WS_EVENT_NAMES.SETTLEMENT_ESCALATED]: SettlementEscalatedPayload;
   [WS_EVENT_NAMES.SUBSCRIBE]: SubscribePayload;
   [WS_EVENT_NAMES.UNSUBSCRIBE]: UnsubscribePayload;
   [WS_EVENT_NAMES.PING]: undefined;
