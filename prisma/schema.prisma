@@ -63,6 +63,16 @@ model Agent {
   winRate             Float                 @default(0)
   totalLlmTokens      Int                   @default(0)
   totalLlmCost        Decimal               @default(0) @db.Decimal(28, 8)
+  /// ERC-7710 delegation: EIP-712 hash of the delegation struct signed by the user.
+  delegationHash      String?
+  /// EIP-712 signature bytes (hex) from the delegating user wallet.
+  delegationSignature String?
+  /// When the delegation expires; ACE rejects trades after this timestamp.
+  delegationExpiry    DateTime?
+  /// ERC-8004 IdentityRegistry token ID minted when the agent wallet is created.
+  erc8004TokenId      String?
+  /// ENS subdomain assigned to this agent, e.g. bullish-scout-1.sub0.eth
+  ensName             String?
   activities          Activity[]
   owner               User                  @relation("UserToAgent", fields: [ownerId], references: [id], onDelete: Cascade)
   template            Template?             @relation(fields: [templateId], references: [id])

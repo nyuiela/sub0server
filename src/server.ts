@@ -33,6 +33,8 @@ import { registerCcipInternalRoutes } from "./routes/ccip-internal.routes.js";
 import { registerTradesRoutes } from "./routes/trades.routes.js";
 import { registerUserBalanceRoutes } from "./routes/user-balances.routes.js";
 import { registerSimulateRoutes } from "./routes/simulate.routes.js";
+import { registerAgentDelegationRoutes } from "./routes/agent-delegation.routes.js";
+import { registerEnsResolverRoutes } from "./routes/ens-resolver.routes.js";
 import type { WebSocket } from "ws";
 
 const fastify = Fastify({ logger: true });
@@ -221,6 +223,8 @@ await registerSettingsRoutes(fastify);
 await registerTradesRoutes(fastify);
 await registerUserBalanceRoutes(fastify);
 await registerSimulateRoutes(fastify);
+await registerAgentDelegationRoutes(fastify);
+await registerEnsResolverRoutes(fastify);
 
 const start = async () => {
   try {

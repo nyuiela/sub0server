@@ -20,6 +20,8 @@ import { getSocketManager } from "../services/websocket.service.js";
 import { WS_EVENT_NAMES } from "../types/websocket-events.js";
 import { runTradingAnalysis } from "../services/agent-trading-analysis.service.js";
 import { runTwoAgentDeliberation } from "../services/settlement-deliberation.service.js";
+import { registerAgentIdentity, publishValidationProof } from "../services/erc8004.service.js";
+import { deriveEnsSlug } from "../lib/ens-slug.js";
 
 const MACRO_DATA_CACHE_KEY = "cre:macro-data:latest";
 const MACRO_DATA_TTL_SEC = 300; // 5 min
@@ -261,14 +263,14 @@ async function postWebhookEvent(req: FastifyRequest<{ Body: unknown }>, reply: F
   return reply.code(200).send({ ok: true, eventType });
 }
 
-/** POST /api/internal/cre/registry-record — relay compliance/proof records (on-chain via contract) */
+/** POST /api/internal/cre/registry-record — relay compliance/proof records + ERC-8004 dispatch */
 async function postRegistryRecord(req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply): Promise<void> {
   if (!requireApiKeyOnly(req, reply)) return;
   const body = req.body as Record<string, unknown>;
   const event = typeof body?.event === "string" ? body.event : "unknown";
-  req.log.info({ event, body }, "[registry-record] received CRE registry record");
-  // Contract interaction would be added here when Sub0CRERegistry is deployed
-  // For now, persist in Redis as a lightweight event log with 24h TTL
+  req.log.info({ event }, "[registry-record] received CRE registry record");
+
+  // Persist in Redis as a lightweight event log with 24h TTL
   try {
     const redis = await getRedisConnection();
     const key = `cre:registry:${event}:${Date.now()}`;
@@ -276,6 +278,41 @@ async function postRegistryRecord(req: FastifyRequest<{ Body: unknown }>, reply:
   } catch (err) {
     req.log.warn({ err }, "registry-record: Redis write failed");
   }
+
+  // Dispatch ERC-8004 side-effects asynchronously (fire-and-forget)
+  const agentId = typeof body?.agentId === "string" ? body.agentId : null;
+  if (event === "erc8004:identity:mint" && agentId) {
+    const walletAddress = typeof body?.walletAddress === "string" ? body.walletAddress : null;
+    if (walletAddress) {
+      registerAgentIdentity(agentId, walletAddress).catch((err) => {
+        req.log.warn({ err, agentId }, "[registry-record] ERC-8004 identity mint failed");
+      });
+      // Auto-assign ENS slug when wallet is created (if not already set)
+      const prisma = getPrismaClient();
+      prisma.agent.findUnique({ where: { id: agentId }, select: { name: true, ensName: true } })
+        .then(async (agent) => {
+          if (!agent?.ensName && agent?.name) {
+            const slug = deriveEnsSlug(agent.name);
+            const ensName = `${slug}.sub0.eth`;
+            const exists = await prisma.agent.findFirst({ where: { ensName, NOT: { id: agentId } }, select: { id: true } });
+            if (!exists) {
+              await prisma.agent.update({ where: { id: agentId }, data: { ensName } });
+              req.log.info({ agentId, ensName }, "[registry-record] auto-assigned ENS name");
+            }
+          }
+        })
+        .catch((err) => req.log.warn({ err, agentId }, "[registry-record] ENS auto-assign failed"));
+    }
+  } else if (event === "erc8004:validation:publish" && agentId) {
+    const proofHash = typeof body?.proofHash === "string" ? body.proofHash : null;
+    const proofType = typeof body?.proofType === "number" ? (body.proofType as 0 | 1 | 2) : null;
+    if (proofHash && proofType != null) {
+      publishValidationProof(agentId, proofHash, proofType).catch((err) => {
+        req.log.warn({ err, agentId }, "[registry-record] ERC-8004 validation publish failed");
+      });
+    }
+  }
+
   return reply.code(200).send({ ok: true, event });
 }
 
@@ -310,6 +347,8 @@ export async function registerCreWorkflowCallbackRoutes(app: FastifyInstance): P
   app.get("/api/internal/cre/macro-data", getMacroData);
   app.post<{ Body: unknown }>("/api/internal/cre/macro-data", postMacroData);
   app.post<{ Body: unknown }>("/api/internal/cre/webhook-event", postWebhookEvent);
+  // Canonical path used by the webhookBridge.ts CRE workflow
+  app.post<{ Body: unknown }>("/api/internal/webhook-bridge", postWebhookEvent);
   app.post<{ Body: unknown }>("/api/internal/cre/registry-record", postRegistryRecord);
   app.post<{ Body: unknown }>("/api/internal/cre/x402-charge", postX402Charge);
 }
